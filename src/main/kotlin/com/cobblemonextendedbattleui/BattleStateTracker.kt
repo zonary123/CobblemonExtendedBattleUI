@@ -276,10 +276,30 @@ object BattleStateTracker {
     }
 
     fun clearPokemonStats(uuid: UUID) {
-        statChanges[uuid] = mutableMapOf()
+        statChanges[uuid]?.clear()
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared stats for UUID $uuid")
+    }
+
+    fun clearPokemonStatsByName(pokemonName: String) {
+        // Try direct lookup first
+        var uuid = nameToUuid[pokemonName.lowercase()]
+
+        // If not found, try stripping possessive prefix (e.g., "Player126's Tyranitar" -> "Tyranitar")
+        if (uuid == null && pokemonName.contains("'s ")) {
+            val strippedName = pokemonName.substringAfter("'s ").lowercase()
+            uuid = nameToUuid[strippedName]
+        }
+
+        if (uuid != null) {
+            clearPokemonStats(uuid)
+        } else {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Could not find UUID for '$pokemonName' to clear stats")
+        }
     }
 
     fun getStatChanges(uuid: UUID): Map<Stat, Int> = statChanges[uuid] ?: emptyMap()
+
+    fun getAllStatChanges(): Map<UUID, Map<Stat, Int>> = statChanges.toMap()
 
     private fun checkForExpiredConditions() {
         weather?.let { w ->

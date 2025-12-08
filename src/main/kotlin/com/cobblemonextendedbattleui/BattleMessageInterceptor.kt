@@ -116,6 +116,9 @@ object BattleMessageInterceptor {
     }
 
     private const val TURN_KEY = "cobblemon.battle.turn"
+    private const val FAINT_KEY = "cobblemon.battle.faint"
+    private const val SWITCH_KEY = "cobblemon.battle.switch"
+    private const val DRAG_KEY = "cobblemon.battle.drag"  // Forced switch (e.g., Roar, Whirlwind)
 
     fun processMessages(messages: List<Text>) {
         for (message in messages) {
@@ -202,6 +205,18 @@ object BattleMessageInterceptor {
                 BattleStateTracker.clearSideCondition(isAlly, condition)
                 return
             }
+
+            // Handle faint - clear stats for the fainted Pokemon
+            if (key == FAINT_KEY) {
+                clearPokemonStats(args)
+                return
+            }
+
+            // Handle switch/drag - clear stats for the Pokemon leaving battle
+            if (key == SWITCH_KEY || key == DRAG_KEY) {
+                clearPokemonStats(args)
+                return
+            }
         }
 
         for (sibling in text.siblings) {
@@ -245,5 +260,18 @@ object BattleMessageInterceptor {
 
         CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Stat change - $pokemonName $statName ${if (stages > 0) "+" else ""}$stages")
         BattleStateTracker.applyStatChange(pokemonName, statName, stages)
+    }
+
+    private fun clearPokemonStats(args: Array<out Any>) {
+        if (args.isEmpty()) return
+
+        val pokemonName = when (val arg0 = args[0]) {
+            is Text -> arg0.string
+            is String -> arg0
+            else -> arg0.toString()
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Clearing stats for $pokemonName (faint/switch)")
+        BattleStateTracker.clearPokemonStatsByName(pokemonName)
     }
 }

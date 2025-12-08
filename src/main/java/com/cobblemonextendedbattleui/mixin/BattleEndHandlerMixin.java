@@ -7,6 +7,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import com.cobblemon.mod.common.client.net.battle.BattleEndHandler;
 import com.cobblemon.mod.common.net.messages.client.battle.BattleEndPacket;
+import com.cobblemonextendedbattleui.BattleInfoPanel;
 import com.cobblemonextendedbattleui.BattleStateTracker;
 import com.cobblemonextendedbattleui.TeamIndicatorUI;
 import net.minecraft.client.MinecraftClient;
@@ -24,5 +25,6 @@ public class BattleEndHandlerMixin {
     private void onHandle(BattleEndPacket packet, MinecraftClient client, CallbackInfo ci) {
         BattleStateTracker.INSTANCE.clear();
         TeamIndicatorUI.INSTANCE.clear();
+        BattleInfoPanel.INSTANCE.clearBattleState();
     }
 }

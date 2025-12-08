@@ -2,6 +2,7 @@ package com.cobblemonextendedbattleui
 
 import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.render.drawScaledText
+import com.mojang.blaze3d.systems.RenderSystem
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.text.Text
@@ -10,7 +11,7 @@ import java.util.UUID
 
 /**
  * Pokemon Scarlet/Violet inspired battle information panel.
- * Features draggable positioning, scroll wheel scaling, and clean arrow-based stat display.
+ * Features draggable positioning, edge/corner resizing, and scrollable content.
  */
 object BattleInfoPanel {
 
@@ -21,43 +22,86 @@ object BattleInfoPanel {
     // Input tracking
     private var wasKeyPressed: Boolean = false
     private var wasMousePressed: Boolean = false
-    private var lastScrollY: Double = 0.0
 
-    // Dragging state
+    // Dragging state (for moving the panel)
     private var isDragging: Boolean = false
     private var dragOffsetX: Int = 0
     private var dragOffsetY: Int = 0
     private var dragStartX: Int = 0
     private var dragStartY: Int = 0
     private var hasDragged: Boolean = false
-    private const val DRAG_THRESHOLD = 5  // Pixels moved before considered a drag
+    private const val DRAG_THRESHOLD = 5
+
+    // Resize state
+    private var isResizing: Boolean = false
+    private var resizeZone: ResizeZone = ResizeZone.NONE
+    private var resizeStartX: Int = 0
+    private var resizeStartY: Int = 0
+    private var resizeStartWidth: Int = 0
+    private var resizeStartHeight: Int = 0
+    private var resizeStartPanelX: Int = 0
+    private var resizeStartPanelY: Int = 0
+    private const val RESIZE_HANDLE_SIZE = 6
+
+    // Scrollbar dragging
+    private var isScrollbarDragging: Boolean = false
+    private var scrollbarDragStartY: Int = 0
+    private var scrollbarDragStartOffset: Int = 0
+
+    // Resize zones
+    enum class ResizeZone {
+        NONE,
+        LEFT,
+        RIGHT,
+        TOP,
+        BOTTOM,
+        TOP_LEFT,
+        TOP_RIGHT,
+        BOTTOM_LEFT,
+        BOTTOM_RIGHT
+    }
 
     // Colors
     private val PANEL_BG = color(22, 27, 34, 240)
     private val HEADER_BG = color(30, 37, 46, 255)
     private val SECTION_BG = color(26, 32, 40, 255)
-    private val CONTENT_BG = color(18, 22, 28, 200)
     private val BORDER_COLOR = color(55, 65, 80, 255)
-    private val BORDER_HIGHLIGHT = color(80, 95, 115, 255)
+    private val RESIZE_HANDLE_COLOR = color(100, 120, 140, 200)
+    private val RESIZE_HANDLE_HOVER = color(130, 160, 190, 255)
+    private val SCROLLBAR_BG = color(40, 48, 58, 200)
+    private val SCROLLBAR_THUMB = color(80, 95, 115, 255)
+    private val SCROLLBAR_THUMB_HOVER = color(100, 120, 145, 255)
     private val TEXT_WHITE = color(255, 255, 255, 255)
     private val TEXT_LIGHT = color(220, 225, 230, 255)
     private val TEXT_DIM = color(140, 150, 165, 255)
     private val TEXT_GOLD = color(255, 210, 80, 255)
     private val STAT_BOOST = color(255, 100, 100, 255)
     private val STAT_DROP = color(100, 160, 255, 255)
-    private val STAT_NEUTRAL = color(160, 165, 175, 255)
     private val ACCENT_PLAYER = color(100, 200, 255, 255)
     private val ACCENT_OPPONENT = color(255, 130, 110, 255)
     private val ACCENT_FIELD = color(255, 200, 100, 255)
 
-    // Layout
+    // Base layout constants (will be scaled based on panel size)
     private const val BASE_PANEL_MARGIN = 10
     private const val BASE_PADDING = 8
     private const val BASE_LINE_HEIGHT = 12
     private const val BASE_SECTION_GAP = 6
     private const val BASE_HEADER_HEIGHT = 22
-    private const val BASE_PANEL_WIDTH = 200
-    private const val BASE_CORNER_RADIUS = 4
+    private const val SCROLLBAR_WIDTH = 3
+
+    // Base font multiplier (makes default text ~20% larger)
+    private const val BASE_FONT_MULTIPLIER = 1.2f
+
+    // Text scale (base * user font preference only, no auto-scaling)
+    private var textScale: Float = BASE_FONT_MULTIPLIER
+
+    // Fixed layout values
+    private const val PADDING = BASE_PADDING
+    private const val SECTION_GAP = BASE_SECTION_GAP
+    private const val HEADER_HEIGHT = BASE_HEADER_HEIGHT
+
+    // Line height scales with font
+    private var lineHeight: Int = BASE_LINE_HEIGHT
 
     // Toggle key
     private const val TOGGLE_KEY = GLFW.GLFW_KEY_V
@@ -69,19 +113,86 @@ object BattleInfoPanel {
     private var panelBoundsH = 0
     private var headerEndY = 0
 
-    private fun scaled(base: Int): Int = (base * PanelConfig.scale).toInt()
-    private fun scaled(base: Float): Float = base * PanelConfig.scale
+    // Content dimensions (actual content height vs visible height)
+    private var contentHeight = 0
+    private var visibleContentHeight = 0
+
+    // Hover state for visual feedback
+    private var hoveredZone: ResizeZone = ResizeZone.NONE
+    private var isOverScrollbar = false
+
+    // Track previously active Pokemon to detect switches and clear their stats
+    private var previouslyActiveUUIDs: Set<java.util.UUID> = emptySet()
+
+    fun clearBattleState() {
+        previouslyActiveUUIDs = emptySet()
+    }
+
     private fun color(r: Int, g: Int, b: Int, a: Int): Int = (a shl 24) or (r shl 16) or (g shl 8) or b
+
+    private fun updateScaledValues() {
+        // Text scale: base multiplier * user font preference (no auto-scaling)
+        textScale = BASE_FONT_MULTIPLIER * PanelConfig.fontScale
+        lineHeight = (BASE_LINE_HEIGHT * textScale).toInt()
+    }
 
     fun toggle() {
         isExpanded = !isExpanded
         PanelConfig.setStartExpanded(isExpanded)
+        PanelConfig.scrollOffset = 0
         PanelConfig.save()
     }
 
     fun initialize() {
         PanelConfig.load()
         isExpanded = PanelConfig.startExpanded
+    }
+
+    private fun getResizeZone(mouseX: Int, mouseY: Int): ResizeZone {
+        // No resizing in collapsed mode
+        if (!isExpanded) return ResizeZone.NONE
+
+        val x = panelBoundsX
+        val y = panelBoundsY
+        val w = panelBoundsW
+        val h = panelBoundsH
+
+        val onLeft = mouseX >= x - RESIZE_HANDLE_SIZE && mouseX <= x + RESIZE_HANDLE_SIZE
+        val onRight = mouseX >= x + w - RESIZE_HANDLE_SIZE && mouseX <= x + w + RESIZE_HANDLE_SIZE
+        val onTop = mouseY >= y - RESIZE_HANDLE_SIZE && mouseY <= y + 2  // Reduced to avoid header conflict
+        val onBottom = mouseY >= y + h - RESIZE_HANDLE_SIZE && mouseY <= y + h + RESIZE_HANDLE_SIZE
+        val withinX = mouseX >= x - RESIZE_HANDLE_SIZE && mouseX <= x + w + RESIZE_HANDLE_SIZE
+        val withinY = mouseY >= y - RESIZE_HANDLE_SIZE && mouseY <= y + h + RESIZE_HANDLE_SIZE
+
+        return when {
+            onTop && onLeft && withinX && withinY -> ResizeZone.TOP_LEFT
+            onTop && onRight && withinX && withinY -> ResizeZone.TOP_RIGHT
+            onBottom && onLeft && withinX && withinY -> ResizeZone.BOTTOM_LEFT
+            onBottom && onRight && withinX && withinY -> ResizeZone.BOTTOM_RIGHT
+            onLeft && withinY -> ResizeZone.LEFT
+            onRight && withinY -> ResizeZone.RIGHT
+            onTop && withinX -> ResizeZone.TOP
+            onBottom && withinX -> ResizeZone.BOTTOM
+            else -> ResizeZone.NONE
+        }
+    }
+
+    private fun isOverScrollbarThumb(mouseX: Int, mouseY: Int): Boolean {
+        if (contentHeight <= visibleContentHeight) return false
+
+        val scrollbarX = panelBoundsX + panelBoundsW - SCROLLBAR_WIDTH - 2
+        val scrollbarY = headerEndY + 2
+        val scrollbarHeight = panelBoundsY + panelBoundsH - headerEndY - 4
+
+        if (mouseX < scrollbarX || mouseX > scrollbarX + SCROLLBAR_WIDTH) return false
+        if (mouseY < scrollbarY || mouseY > scrollbarY + scrollbarHeight) return false
+
+        val thumbHeight = ((visibleContentHeight.toFloat() / contentHeight) * scrollbarHeight).toInt().coerceAtLeast(20)
+        val maxScroll = contentHeight - visibleContentHeight
+        val scrollRatio = if (maxScroll > 0) PanelConfig.scrollOffset.toFloat() / maxScroll else 0f
+        val thumbY = scrollbarY + ((scrollbarHeight - thumbHeight) * scrollRatio).toInt()
+
+        return mouseY >= thumbY && mouseY <= thumbY + thumbHeight
     }
 
     private fun handleInput(mc: MinecraftClient) {
@@ -95,29 +206,151 @@ object BattleInfoPanel {
         val mouseY = (mc.mouse.y * mc.window.scaledHeight / mc.window.height).toInt()
         val isMouseDown = GLFW.glfwGetMouseButton(handle, GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS
 
+        val screenWidth = mc.window.scaledWidth
+        val screenHeight = mc.window.scaledHeight
+
+        hoveredZone = if (!isDragging && !isResizing && !isScrollbarDragging) getResizeZone(mouseX, mouseY) else hoveredZone
+        isOverScrollbar = if (!isDragging && !isResizing && !isScrollbarDragging) isOverScrollbarThumb(mouseX, mouseY) else isOverScrollbar
+
         val isOverPanel = mouseX >= panelBoundsX && mouseX <= panelBoundsX + panelBoundsW &&
                           mouseY >= panelBoundsY && mouseY <= panelBoundsY + panelBoundsH
         val isOverHeader = isOverPanel && mouseY <= headerEndY
 
         if (isMouseDown) {
-            if (!wasMousePressed && isOverHeader) {
-                isDragging = true
-                hasDragged = false
-                dragOffsetX = mouseX - panelBoundsX
-                dragOffsetY = mouseY - panelBoundsY
-                dragStartX = mouseX
-                dragStartY = mouseY
-            } else if (isDragging) {
-                val deltaX = kotlin.math.abs(mouseX - dragStartX)
-                val deltaY = kotlin.math.abs(mouseY - dragStartY)
-                if (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD) {
-                    hasDragged = true
+            when {
+                !wasMousePressed && isOverScrollbarThumb(mouseX, mouseY) -> {
+                    isScrollbarDragging = true
+                    scrollbarDragStartY = mouseY
+                    scrollbarDragStartOffset = PanelConfig.scrollOffset
                 }
-                if (hasDragged) {
-                    PanelConfig.setPosition(mouseX - dragOffsetX, mouseY - dragOffsetY)
+                isScrollbarDragging -> {
+                    val scrollbarY = headerEndY + 2
+                    val scrollbarHeight = panelBoundsY + panelBoundsH - headerEndY - 4
+                    val thumbHeight = ((visibleContentHeight.toFloat() / contentHeight) * scrollbarHeight).toInt().coerceAtLeast(20)
+                    val trackHeight = scrollbarHeight - thumbHeight
+
+                    if (trackHeight > 0) {
+                        val deltaY = mouseY - scrollbarDragStartY
+                        val maxScroll = contentHeight - visibleContentHeight
+                        val scrollDelta = (deltaY.toFloat() / trackHeight * maxScroll).toInt()
+                        PanelConfig.scrollOffset = (scrollbarDragStartOffset + scrollDelta).coerceIn(0, maxScroll)
+                    }
+                }
+                !wasMousePressed && hoveredZone != ResizeZone.NONE -> {
+                    isResizing = true
+                    resizeZone = hoveredZone
+                    resizeStartX = mouseX
+                    resizeStartY = mouseY
+                    resizeStartWidth = panelBoundsW
+                    resizeStartHeight = panelBoundsH
+                    resizeStartPanelX = panelBoundsX
+                    resizeStartPanelY = panelBoundsY
+                }
+                isResizing -> {
+                    val deltaX = mouseX - resizeStartX
+                    val deltaY = mouseY - resizeStartY
+
+                    var newWidth = resizeStartWidth
+                    var newHeight = resizeStartHeight
+                    var newX = resizeStartPanelX
+                    var newY = resizeStartPanelY
+
+                    when (resizeZone) {
+                        ResizeZone.RIGHT -> newWidth = resizeStartWidth + deltaX
+                        ResizeZone.BOTTOM -> newHeight = resizeStartHeight + deltaY
+                        ResizeZone.BOTTOM_RIGHT -> {
+                            newWidth = resizeStartWidth + deltaX
+                            newHeight = resizeStartHeight + deltaY
+                        }
+                        ResizeZone.LEFT -> {
+                            newWidth = resizeStartWidth - deltaX
+                            newX = resizeStartPanelX + deltaX
+                        }
+                        ResizeZone.TOP -> {
+                            newHeight = resizeStartHeight - deltaY
+                            newY = resizeStartPanelY + deltaY
+                        }
+                        ResizeZone.TOP_LEFT -> {
+                            newWidth = resizeStartWidth - deltaX
+                            newHeight = resizeStartHeight - deltaY
+                            newX = resizeStartPanelX + deltaX
+                            newY = resizeStartPanelY + deltaY
+                        }
+                        ResizeZone.TOP_RIGHT -> {
+                            newWidth = resizeStartWidth + deltaX
+                            newHeight = resizeStartHeight - deltaY
+                            newY = resizeStartPanelY + deltaY
+                        }
+                        ResizeZone.BOTTOM_LEFT -> {
+                            newWidth = resizeStartWidth - deltaX
+                            newHeight = resizeStartHeight + deltaY
+                            newX = resizeStartPanelX + deltaX
+                        }
+                        ResizeZone.NONE -> {}
+                    }
+
+                    val minW = PanelConfig.getMinWidth()
+                    val minH = PanelConfig.getMinHeight()
+                    val maxW = PanelConfig.getMaxWidth(screenWidth)
+                    val maxH = PanelConfig.getMaxHeight(screenHeight)
+
+                    if (resizeZone in listOf(ResizeZone.LEFT, ResizeZone.TOP_LEFT, ResizeZone.BOTTOM_LEFT)) {
+                        if (newWidth < minW) {
+                            newX = resizeStartPanelX + resizeStartWidth - minW
+                            newWidth = minW
+                        }
+                        if (newWidth > maxW) {
+                            newX = resizeStartPanelX + resizeStartWidth - maxW
+                            newWidth = maxW
+                        }
+                    }
+                    if (resizeZone in listOf(ResizeZone.TOP, ResizeZone.TOP_LEFT, ResizeZone.TOP_RIGHT)) {
+                        if (newHeight < minH) {
+                            newY = resizeStartPanelY + resizeStartHeight - minH
+                            newHeight = minH
+                        }
+                        if (newHeight > maxH) {
+                            newY = resizeStartPanelY + resizeStartHeight - maxH
+                            newHeight = maxH
+                        }
+                    }
+
+                    newWidth = newWidth.coerceIn(minW, maxW)
+                    newHeight = newHeight.coerceIn(minH, maxH)
+                    newX = newX.coerceIn(0, screenWidth - newWidth)
+                    newY = newY.coerceIn(0, screenHeight - newHeight)
+
+                    PanelConfig.setDimensions(newWidth, newHeight)
+                    PanelConfig.setPosition(newX, newY)
+                }
+                !wasMousePressed && isOverHeader -> {
+                    isDragging = true
+                    hasDragged = false
+                    dragOffsetX = mouseX - panelBoundsX
+                    dragOffsetY = mouseY - panelBoundsY
+                    dragStartX = mouseX
+                    dragStartY = mouseY
+                }
+                isDragging -> {
+                    val deltaX = kotlin.math.abs(mouseX - dragStartX)
+                    val deltaY = kotlin.math.abs(mouseY - dragStartY)
+                    if (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD) {
+                        hasDragged = true
+                    }
+                    if (hasDragged) {
+                        PanelConfig.setPosition(mouseX - dragOffsetX, mouseY - dragOffsetY)
+                    }
                 }
             }
         } else {
+            if (isScrollbarDragging) {
+                isScrollbarDragging = false
+            }
+            if (isResizing) {
+                isResizing = false
+                resizeZone = ResizeZone.NONE
+                PanelConfig.save()
+            }
             if (isDragging) {
                 if (hasDragged) {
                     PanelConfig.save()
@@ -140,10 +373,23 @@ object BattleInfoPanel {
                           scaledY >= panelBoundsY && scaledY <= panelBoundsY + panelBoundsH
 
         if (isOverPanel && deltaY != 0.0) {
-            val delta = if (deltaY > 0) PanelConfig.SCALE_STEP else -PanelConfig.SCALE_STEP
-            PanelConfig.adjustScale(delta)
-            PanelConfig.save()
-            return true  // Consume the scroll event
+            // Check if Ctrl is held for font scaling
+            val isCtrlHeld = GLFW.glfwGetKey(mc.window.handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS ||
+                             GLFW.glfwGetKey(mc.window.handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS
+
+            if (isCtrlHeld) {
+                // Ctrl+Scroll: adjust font size
+                val delta = if (deltaY > 0) PanelConfig.FONT_SCALE_STEP else -PanelConfig.FONT_SCALE_STEP
+                PanelConfig.adjustFontScale(delta)
+                PanelConfig.save()
+                return true
+            } else if (contentHeight > visibleContentHeight) {
+                // Normal scroll: scroll content
+                val scrollAmount = (lineHeight * 2 * if (deltaY > 0) -1 else 1)
+                val maxScroll = (contentHeight - visibleContentHeight).coerceAtLeast(0)
+                PanelConfig.scrollOffset = (PanelConfig.scrollOffset + scrollAmount).coerceIn(0, maxScroll)
+                return true
+            }
         }
         return false
     }
@@ -158,7 +404,6 @@ object BattleInfoPanel {
         val screenWidth = mc.window.scaledWidth
         val screenHeight = mc.window.scaledHeight
 
-        // Register Pokemon for stat tracking
         val playerUUID = mc.player?.uuid ?: return
         val playerSide = if (battle.side1.actors.any { it.uuid == playerUUID }) battle.side1 else battle.side2
         val opponentSide = if (playerSide == battle.side1) battle.side2 else battle.side1
@@ -166,115 +411,268 @@ object BattleInfoPanel {
         val allPokemon = (playerSide.activeClientBattlePokemon + opponentSide.activeClientBattlePokemon)
             .mapNotNull { it.battlePokemon }
 
+        // Get current active Pokemon UUIDs
+        val currentActiveUUIDs = allPokemon.map { it.uuid }.toSet()
+
+        // Clear stats for any Pokemon that was previously active but is no longer
+        // (switching out resets stat changes in Pokemon)
+        for (uuid in previouslyActiveUUIDs) {
+            if (uuid !in currentActiveUUIDs) {
+                BattleStateTracker.clearPokemonStats(uuid)
+            }
+        }
+        previouslyActiveUUIDs = currentActiveUUIDs
+
         for (pokemon in allPokemon) {
             BattleStateTracker.registerPokemon(pokemon.uuid, pokemon.displayName.string)
         }
 
-        // Calculate panel dimensions
-        val panelWidth = scaled(BASE_PANEL_WIDTH)
-        val panelHeight = if (isExpanded) calculateExpandedHeight(allPokemon.size) else calculateCollapsedHeight()
+        // Build pokemon data with stat changes for height calculation and rendering
+        val pokemonWithStats = allPokemon.map { pokemon ->
+            val stats = BattleStateTracker.getStatChanges(pokemon.uuid)
+            val changedStats = stats.entries.filter { it.value != 0 }
+            Triple(pokemon.uuid, pokemon.displayName.string, changedStats)
+        }
 
-        // Panel position (custom or default)
-        val panelX = PanelConfig.panelX ?: (screenWidth - panelWidth - scaled(BASE_PANEL_MARGIN))
+        // Update font scaling based on user preference
+        updateScaledValues()
+
+        // Get panel dimensions - collapsed auto-fits content, expanded uses user settings
+        val panelWidth: Int
+        val panelHeight: Int
+
+        if (isExpanded) {
+            panelWidth = PanelConfig.panelWidth ?: PanelConfig.DEFAULT_WIDTH
+            contentHeight = calculateExpandedContentHeight(pokemonWithStats, panelWidth)
+            panelHeight = PanelConfig.panelHeight ?: (contentHeight + HEADER_HEIGHT + PADDING * 2)
+        } else {
+            // Collapsed: use same width, auto-fit height to content (never scroll)
+            panelWidth = PanelConfig.panelWidth ?: PanelConfig.DEFAULT_WIDTH
+            contentHeight = calculateCollapsedContentHeight(pokemonWithStats)
+            // Use PADDING * 2 to match visibleContentHeight calculation and prevent scrollbar
+            panelHeight = contentHeight + HEADER_HEIGHT + PADDING * 2
+        }
+
+        val panelX = PanelConfig.panelX ?: (screenWidth - panelWidth - BASE_PANEL_MARGIN)
         val panelY = PanelConfig.panelY ?: ((screenHeight - panelHeight) / 2)
 
-        // Clamp to screen bounds
         val clampedX = panelX.coerceIn(0, (screenWidth - panelWidth).coerceAtLeast(0))
         val clampedY = panelY.coerceIn(0, (screenHeight - panelHeight).coerceAtLeast(0))
 
-        // Store bounds for input detection
         panelBoundsX = clampedX
         panelBoundsY = clampedY
         panelBoundsW = panelWidth
         panelBoundsH = panelHeight
 
+        // Must match contentAreaHeight used in scissor: height - HEADER_HEIGHT - PADDING
+        visibleContentHeight = panelHeight - HEADER_HEIGHT - PADDING
+
+        val maxScroll = (contentHeight - visibleContentHeight).coerceAtLeast(0)
+        PanelConfig.scrollOffset = PanelConfig.scrollOffset.coerceIn(0, maxScroll)
+
         if (isExpanded) {
-            renderExpanded(context, clampedX, clampedY, panelWidth, allPokemon.map { it.uuid to it.displayName.string })
+            renderExpanded(context, clampedX, clampedY, panelWidth, panelHeight, pokemonWithStats)
         } else {
-            renderCollapsed(context, clampedX, clampedY, panelWidth)
+            renderCollapsed(context, clampedX, clampedY, panelWidth, panelHeight, pokemonWithStats)
+        }
+
+        // Only draw resize handles in expanded mode
+        if (isExpanded) {
+            drawResizeHandles(context, clampedX, clampedY, panelWidth, panelHeight)
         }
     }
 
-    private fun renderCollapsed(context: DrawContext, x: Int, y: Int, width: Int) {
-        val height = calculateCollapsedHeight()
-        val padding = scaled(BASE_PADDING)
-        val lineHeight = scaled(BASE_LINE_HEIGHT)
-        val headerHeight = scaled(BASE_HEADER_HEIGHT)
+    private fun drawResizeHandles(context: DrawContext, x: Int, y: Int, w: Int, h: Int) {
+        val handleColor = if (hoveredZone != ResizeZone.NONE || isResizing) RESIZE_HANDLE_HOVER else RESIZE_HANDLE_COLOR
+        val cornerLength = 12  // Length of each arm of the L-shape
+        val thickness = 2      // Thickness of the lines
 
-        // Panel background with border
+        // Always show bottom-right corner handle (most common resize)
+        drawCornerHandle(context, x + w, y + h, cornerLength, thickness, handleColor, bottomRight = true)
+
+        // Show all handles when hovering or resizing
+        if (hoveredZone != ResizeZone.NONE || isResizing) {
+            // Corner L-shapes
+            drawCornerHandle(context, x, y, cornerLength, thickness, handleColor, topLeft = true)
+            drawCornerHandle(context, x + w, y, cornerLength, thickness, handleColor, topRight = true)
+            drawCornerHandle(context, x, y + h, cornerLength, thickness, handleColor, bottomLeft = true)
+
+            // Edge handles (small lines in the middle of each edge)
+            val edgeLength = 16
+            val midX = x + w / 2
+            val midY = y + h / 2
+
+            // Top edge
+            context.fill(midX - edgeLength / 2, y, midX + edgeLength / 2, y + thickness, handleColor)
+            // Bottom edge
+            context.fill(midX - edgeLength / 2, y + h - thickness, midX + edgeLength / 2, y + h, handleColor)
+            // Left edge
+            context.fill(x, midY - edgeLength / 2, x + thickness, midY + edgeLength / 2, handleColor)
+            // Right edge
+            context.fill(x + w - thickness, midY - edgeLength / 2, x + w, midY + edgeLength / 2, handleColor)
+        }
+    }
+
+    private fun drawCornerHandle(
+        context: DrawContext,
+        cornerX: Int,
+        cornerY: Int,
+        length: Int,
+        thickness: Int,
+        color: Int,
+        topLeft: Boolean = false,
+        topRight: Boolean = false,
+        bottomLeft: Boolean = false,
+        bottomRight: Boolean = false
+    ) {
+        when {
+            topLeft -> {
+                // Horizontal arm going right
+                context.fill(cornerX, cornerY, cornerX + length, cornerY + thickness, color)
+                // Vertical arm going down
+                context.fill(cornerX, cornerY, cornerX + thickness, cornerY + length, color)
+            }
+            topRight -> {
+                // Horizontal arm going left
+                context.fill(cornerX - length, cornerY, cornerX, cornerY + thickness, color)
+                // Vertical arm going down
+                context.fill(cornerX - thickness, cornerY, cornerX, cornerY + length, color)
+            }
+            bottomLeft -> {
+                // Horizontal arm going right
+                context.fill(cornerX, cornerY - thickness, cornerX + length, cornerY, color)
+                // Vertical arm going up
+                context.fill(cornerX, cornerY - length, cornerX + thickness, cornerY, color)
+            }
+            bottomRight -> {
+                // Horizontal arm going left
+                context.fill(cornerX - length, cornerY - thickness, cornerX, cornerY, color)
+                // Vertical arm going up
+                context.fill(cornerX - thickness, cornerY - length, cornerX, cornerY, color)
+            }
+        }
+    }
+
+    private fun renderScrollbar(context: DrawContext, x: Int, y: Int, height: Int) {
+        if (contentHeight <= visibleContentHeight) return
+
+        context.fill(x, y, x + SCROLLBAR_WIDTH, y + height, SCROLLBAR_BG)
+
+        val thumbHeight = ((visibleContentHeight.toFloat() / contentHeight) * height).toInt().coerceAtLeast(20)
+        val maxScroll = contentHeight - visibleContentHeight
+        val scrollRatio = if (maxScroll > 0) PanelConfig.scrollOffset.toFloat() / maxScroll else 0f
+        val thumbY = y + ((height - thumbHeight) * scrollRatio).toInt()
+
+        val thumbColor = if (isOverScrollbar || isScrollbarDragging) SCROLLBAR_THUMB_HOVER else SCROLLBAR_THUMB
+        context.fill(x, thumbY, x + SCROLLBAR_WIDTH, thumbY + thumbHeight, thumbColor)
+    }
+
+    private fun renderCollapsed(
+        context: DrawContext,
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        pokemonWithStats: List<Triple<java.util.UUID, String, List<Map.Entry<com.cobblemon.mod.common.api.pokemon.stats.Stat, Int>>>>
+    ) {
         drawRoundedRect(context, x, y, width, height, PANEL_BG, BORDER_COLOR)
-
-        // Header
         renderHeader(context, x, y, width)
 
-        var currentY = y + headerHeight + padding / 2
+        // Scissor starts just after header with small margin
+        val scissorStartY = y + HEADER_HEIGHT + 2
+        val contentAreaHeight = height - HEADER_HEIGHT - PADDING / 2
+        val scrollbarSpace = if (contentHeight > visibleContentHeight) SCROLLBAR_WIDTH + 4 else 0
+        val contentWidth = width - scrollbarSpace
 
-        // Field conditions with icon, name, and turns
-        BattleStateTracker.weather?.let { w ->
-            val turns = BattleStateTracker.getWeatherTurnsRemaining() ?: "?"
-            drawText(context, "${w.type.icon} ${w.type.displayName}", (x + padding).toFloat(), currentY.toFloat(), ACCENT_FIELD, scaled(0.8f))
-            drawText(context, turns, (x + width - padding - scaled(turns.length * 5)).toFloat(), currentY.toFloat(), TEXT_DIM, scaled(0.75f))
-            currentY += lineHeight
-        }
+        enableScissor(context, x + 1, scissorStartY, contentWidth - 2, contentAreaHeight)
 
-        BattleStateTracker.terrain?.let { t ->
-            val turns = BattleStateTracker.getTerrainTurnsRemaining() ?: "?"
-            drawText(context, "${t.type.icon} ${t.type.displayName}", (x + padding).toFloat(), currentY.toFloat(), ACCENT_FIELD, scaled(0.8f))
-            drawText(context, turns, (x + width - padding - scaled(turns.length * 5)).toFloat(), currentY.toFloat(), TEXT_DIM, scaled(0.75f))
-            currentY += lineHeight
-        }
+        // Content starts with a bit more padding for visual spacing
+        var currentY = scissorStartY + 2 - PanelConfig.scrollOffset
 
-        BattleStateTracker.getFieldConditions().forEach { (type, _) ->
-            val turns = BattleStateTracker.getFieldConditionTurnsRemaining(type) ?: "?"
-            drawText(context, "${type.icon} ${type.displayName}", (x + padding).toFloat(), currentY.toFloat(), ACCENT_FIELD, scaled(0.8f))
-            drawText(context, turns, (x + width - padding - scaled(turns.length * 5)).toFloat(), currentY.toFloat(), TEXT_DIM, scaled(0.75f))
-            currentY += lineHeight
-        }
-
-        // Side condition counts
+        val hasWeather = BattleStateTracker.weather != null
+        val hasTerrain = BattleStateTracker.terrain != null
+        val fieldConditions = BattleStateTracker.getFieldConditions()
         val playerConds = BattleStateTracker.getPlayerSideConditions()
         val oppConds = BattleStateTracker.getOpponentSideConditions()
 
-        if (playerConds.isNotEmpty()) {
-            drawText(context, "Ally: ${playerConds.size} effect${if (playerConds.size > 1) "s" else ""}",
-                (x + padding).toFloat(), currentY.toFloat(), ACCENT_PLAYER, scaled(0.8f))
-            currentY += (lineHeight * 0.9).toInt()
+        // Count only ACTIVE pokemon with stat changes (not switched out or fainted)
+        val statChangeCount = pokemonWithStats.count { (_, _, changedStats) ->
+            changedStats.isNotEmpty()
         }
 
-        if (oppConds.isNotEmpty()) {
-            drawText(context, "Enemy: ${oppConds.size} effect${if (oppConds.size > 1) "s" else ""}",
-                (x + padding).toFloat(), currentY.toFloat(), ACCENT_OPPONENT, scaled(0.8f))
-            currentY += (lineHeight * 0.9).toInt()
+        val hasAnyEffects = hasWeather || hasTerrain || fieldConditions.isNotEmpty() ||
+                           playerConds.isNotEmpty() || oppConds.isNotEmpty() || statChangeCount > 0
+
+        if (!hasAnyEffects) {
+            drawText(context, "No effects", (x + PADDING).toFloat(), currentY.toFloat(), TEXT_DIM, 0.8f * textScale)
+        } else {
+            BattleStateTracker.weather?.let { w ->
+                val turns = BattleStateTracker.getWeatherTurnsRemaining() ?: "?"
+                drawText(context, "${w.type.icon} ${w.type.displayName}", (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_FIELD, 0.8f * textScale)
+                drawText(context, turns, (x + contentWidth - PADDING - turns.length * (5 * textScale).toInt()).toFloat(), currentY.toFloat(), TEXT_DIM, 0.75f * textScale)
+                currentY += lineHeight
+            }
+
+            BattleStateTracker.terrain?.let { t ->
+                val turns = BattleStateTracker.getTerrainTurnsRemaining() ?: "?"
+                drawText(context, "${t.type.icon} ${t.type.displayName}", (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_FIELD, 0.8f * textScale)
+                drawText(context, turns, (x + contentWidth - PADDING - turns.length * (5 * textScale).toInt()).toFloat(), currentY.toFloat(), TEXT_DIM, 0.75f * textScale)
+                currentY += lineHeight
+            }
+
+            fieldConditions.forEach { (type, _) ->
+                val turns = BattleStateTracker.getFieldConditionTurnsRemaining(type) ?: "?"
+                drawText(context, "${type.icon} ${type.displayName}", (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_FIELD, 0.8f * textScale)
+                drawText(context, turns, (x + contentWidth - PADDING - turns.length * (5 * textScale).toInt()).toFloat(), currentY.toFloat(), TEXT_DIM, 0.75f * textScale)
+                currentY += lineHeight
+            }
+
+            if (playerConds.isNotEmpty()) {
+                drawText(context, "Ally: ${playerConds.size} effect${if (playerConds.size > 1) "s" else ""}",
+                    (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_PLAYER, 0.8f * textScale)
+                currentY += (lineHeight * 0.9).toInt()
+            }
+
+            if (oppConds.isNotEmpty()) {
+                drawText(context, "Enemy: ${oppConds.size} effect${if (oppConds.size > 1) "s" else ""}",
+                    (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_OPPONENT, 0.8f * textScale)
+                currentY += (lineHeight * 0.9).toInt()
+            }
+
+            if (statChangeCount > 0) {
+                val pokemonText = if (statChangeCount == 1) "1 Pokémon" else "$statChangeCount Pokémon"
+                drawText(context, "Stats: $pokemonText modified",
+                    (x + PADDING).toFloat(), currentY.toFloat(), TEXT_GOLD, 0.8f * textScale)
+            }
         }
 
-        // Instructions
-        currentY = y + height - padding - scaled(8)
-        drawText(context, "V: expand | Drag: move | Scroll: size",
-            (x + padding).toFloat(), currentY.toFloat(), TEXT_DIM, scaled(0.6f))
+        disableScissor()
+
+        if (contentHeight > visibleContentHeight) {
+            renderScrollbar(context, x + width - SCROLLBAR_WIDTH - 2, scissorStartY, contentAreaHeight)
+        }
     }
 
-    private fun renderExpanded(context: DrawContext, x: Int, y: Int, width: Int, pokemon: List<Pair<UUID, String>>) {
-        val height = calculateExpandedHeight(pokemon.size)
-        val padding = scaled(BASE_PADDING)
-        val lineHeight = scaled(BASE_LINE_HEIGHT)
-        val headerHeight = scaled(BASE_HEADER_HEIGHT)
-        val sectionGap = scaled(BASE_SECTION_GAP)
-
-        // Panel background with border
+    private fun renderExpanded(context: DrawContext, x: Int, y: Int, width: Int, height: Int, pokemonWithStats: List<Triple<UUID, String, List<Map.Entry<com.cobblemon.mod.common.api.pokemon.stats.Stat, Int>>>>) {
         drawRoundedRect(context, x, y, width, height, PANEL_BG, BORDER_COLOR)
-
-        // Header
         renderHeader(context, x, y, width)
 
-        var currentY = y + headerHeight + sectionGap
+        val contentStartY = y + HEADER_HEIGHT + SECTION_GAP
+        val contentAreaHeight = height - HEADER_HEIGHT - PADDING
+        val scrollbarSpace = if (contentHeight > visibleContentHeight) SCROLLBAR_WIDTH + 4 else 0
+        val contentWidth = width - scrollbarSpace
 
-        currentY = renderSection(context, x, currentY, width, "FIELD", ACCENT_FIELD) { sectionY ->
+        enableScissor(context, x + 1, contentStartY, contentWidth - 2, contentAreaHeight)
+
+        var currentY = contentStartY - PanelConfig.scrollOffset
+
+        currentY = renderSection(context, x, currentY, contentWidth, "FIELD", ACCENT_FIELD) { sectionY ->
             var sy = sectionY
             var hasContent = false
 
             BattleStateTracker.weather?.let { w ->
                 val turns = BattleStateTracker.getWeatherTurnsRemaining() ?: "?"
-                drawConditionLine(context, x + padding, sy, width - padding * 2,
+                drawConditionLine(context, x + PADDING, sy, contentWidth - PADDING * 2,
                     w.type.icon, w.type.displayName, turns, ACCENT_FIELD)
                 sy += lineHeight
                 hasContent = true
@@ -282,7 +680,7 @@ object BattleInfoPanel {
 
             BattleStateTracker.terrain?.let { t ->
                 val turns = BattleStateTracker.getTerrainTurnsRemaining() ?: "?"
-                drawConditionLine(context, x + padding, sy, width - padding * 2,
+                drawConditionLine(context, x + PADDING, sy, contentWidth - PADDING * 2,
                     t.type.icon, t.type.displayName, turns, ACCENT_FIELD)
                 sy += lineHeight
                 hasContent = true
@@ -290,22 +688,22 @@ object BattleInfoPanel {
 
             BattleStateTracker.getFieldConditions().forEach { (type, _) ->
                 val turns = BattleStateTracker.getFieldConditionTurnsRemaining(type) ?: "?"
-                drawConditionLine(context, x + padding, sy, width - padding * 2,
+                drawConditionLine(context, x + PADDING, sy, contentWidth - PADDING * 2,
                     type.icon, type.displayName, turns, ACCENT_FIELD)
                 sy += lineHeight
                 hasContent = true
             }
 
             if (!hasContent) {
-                drawText(context, "None active", (x + padding).toFloat(), sy.toFloat(), TEXT_DIM, scaled(0.8f))
+                drawText(context, "None active", (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
                 sy += lineHeight
             }
             sy
         }
 
-        currentY += sectionGap
+        currentY += SECTION_GAP
 
-        currentY = renderSection(context, x, currentY, width, "ALLY EFFECTS", ACCENT_PLAYER) { sectionY ->
+        currentY = renderSection(context, x, currentY, contentWidth, "ALLY EFFECTS", ACCENT_PLAYER) { sectionY ->
             var sy = sectionY
             val conditions = BattleStateTracker.getPlayerSideConditions()
 
@@ -317,20 +715,20 @@ object BattleInfoPanel {
                         state.stacks > 1 -> "x${state.stacks}"
                         else -> ""
                     }
-                    drawConditionLine(context, x + padding, sy, width - padding * 2,
+                    drawConditionLine(context, x + PADDING, sy, contentWidth - PADDING * 2,
                         type.icon, type.displayName, info, ACCENT_PLAYER)
                     sy += lineHeight
                 }
             } else {
-                drawText(context, "None active", (x + padding).toFloat(), sy.toFloat(), TEXT_DIM, scaled(0.8f))
+                drawText(context, "None active", (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
                 sy += lineHeight
             }
             sy
         }
 
-        currentY += sectionGap
+        currentY += SECTION_GAP
 
-        currentY = renderSection(context, x, currentY, width, "ENEMY EFFECTS", ACCENT_OPPONENT) { sectionY ->
+        currentY = renderSection(context, x, currentY, contentWidth, "ENEMY EFFECTS", ACCENT_OPPONENT) { sectionY ->
             var sy = sectionY
             val conditions = BattleStateTracker.getOpponentSideConditions()
 
@@ -342,56 +740,55 @@ object BattleInfoPanel {
                         state.stacks > 1 -> "x${state.stacks}"
                         else -> ""
                     }
-                    drawConditionLine(context, x + padding, sy, width - padding * 2,
+                    drawConditionLine(context, x + PADDING, sy, contentWidth - PADDING * 2,
                         type.icon, type.displayName, info, ACCENT_OPPONENT)
                     sy += lineHeight
                 }
             } else {
-                drawText(context, "None active", (x + padding).toFloat(), sy.toFloat(), TEXT_DIM, scaled(0.8f))
+                drawText(context, "None active", (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
                 sy += lineHeight
             }
             sy
         }
 
-        currentY += sectionGap
+        currentY += SECTION_GAP
 
-        currentY = renderSection(context, x, currentY, width, "STAT STAGES", TEXT_GOLD) { sectionY ->
+        val hasAnyStatChanges = pokemonWithStats.any { it.third.isNotEmpty() }
+
+        renderSection(context, x, currentY, contentWidth, "STAT STAGES", TEXT_GOLD) { sectionY ->
             var sy = sectionY
 
-            for ((uuid, name) in pokemon) {
-                val stats = BattleStateTracker.getStatChanges(uuid)
-                val changedStats = stats.entries.filter { it.value != 0 }
+            if (!hasAnyStatChanges) {
+                drawText(context, "None active", (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
+                sy += lineHeight
+            } else {
+                for ((_, name, changedStats) in pokemonWithStats) {
+                    if (changedStats.isEmpty()) continue
 
-                // Pokemon name
-                drawText(context, name, (x + padding).toFloat(), sy.toFloat(),
-                    if (changedStats.isNotEmpty()) TEXT_WHITE else TEXT_DIM, scaled(0.85f))
-                sy += (lineHeight * 0.95).toInt()
+                    drawText(context, name, (x + PADDING).toFloat(), sy.toFloat(), TEXT_WHITE, 0.85f * textScale)
+                    sy += (lineHeight * 0.95).toInt()
 
-                if (changedStats.isNotEmpty()) {
                     val sortedStats = changedStats.sortedBy { getStatSortOrder(it.key.identifier.toString()) }
-                    val maxWidth = width - padding * 2 - scaled(8)
-                    val startX = x + padding + scaled(8)
+                    val charWidth = (5 * textScale).toInt()
+                    val startX = x + PADDING + (8 * textScale).toInt()
 
-                    // Draw each stat with wrapping
                     var statX = startX
                     for ((stat, value) in sortedStats) {
                         val abbr = getStatAbbr(stat.identifier.toString())
                         val arrows = if (value > 0) "↑".repeat(value) else "↓".repeat(-value)
                         val color = if (value > 0) STAT_BOOST else STAT_DROP
 
-                        // Calculate width this entry will take
-                        val entryWidth = scaled((abbr.length * 5 + 2 + arrows.length * 5 + 8).toFloat()).toInt()
+                        val entryWidth = ((abbr.length * charWidth) + 2 + (arrows.length * charWidth) + (8 * textScale)).toInt()
 
-                        // Wrap to next line if needed
-                        if (statX + entryWidth > x + width - padding && statX != startX) {
+                        if (statX + entryWidth > x + contentWidth - PADDING && statX != startX) {
                             sy += (lineHeight * 0.9).toInt()
                             statX = startX
                         }
 
-                        drawText(context, abbr, statX.toFloat(), sy.toFloat(), TEXT_LIGHT, scaled(0.75f))
-                        statX += scaled((abbr.length * 5 + 2).toFloat()).toInt()
-                        drawText(context, arrows, statX.toFloat(), sy.toFloat(), color, scaled(0.75f))
-                        statX += scaled((arrows.length * 5 + 8).toFloat()).toInt()
+                        drawText(context, abbr, statX.toFloat(), sy.toFloat(), TEXT_LIGHT, 0.75f * textScale)
+                        statX += (abbr.length * charWidth) + 2
+                        drawText(context, arrows, statX.toFloat(), sy.toFloat(), color, 0.75f * textScale)
+                        statX += (arrows.length * charWidth) + (8 * textScale).toInt()
                     }
                     sy += (lineHeight * 0.9).toInt()
                 }
@@ -399,27 +796,43 @@ object BattleInfoPanel {
             sy
         }
 
-        currentY = y + height - scaled(BASE_PADDING) - scaled(8)
-        drawText(context, "V: collapse | Drag header: move | Scroll: resize",
-            (x + padding).toFloat(), currentY.toFloat(), TEXT_DIM, scaled(0.55f))
+        disableScissor()
+
+        if (contentHeight > visibleContentHeight) {
+            renderScrollbar(context, x + width - SCROLLBAR_WIDTH - 2, contentStartY, contentAreaHeight)
+        }
+    }
+
+    private fun enableScissor(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
+        val mc = MinecraftClient.getInstance()
+        val scale = mc.window.scaleFactor
+
+        val scaledX = (x * scale).toInt()
+        val scaledY = ((mc.window.scaledHeight - y - height) * scale).toInt()
+        val scaledWidth = (width * scale).toInt()
+        val scaledHeight = (height * scale).toInt()
+
+        RenderSystem.enableScissor(scaledX, scaledY, scaledWidth, scaledHeight)
+    }
+
+    private fun disableScissor() {
+        RenderSystem.disableScissor()
     }
 
     private fun renderHeader(context: DrawContext, x: Int, y: Int, width: Int) {
-        val headerHeight = scaled(BASE_HEADER_HEIGHT)
-        val padding = scaled(BASE_PADDING)
-
-        context.fill(x + 1, y + 1, x + width - 1, y + headerHeight, HEADER_BG)
-        headerEndY = y + headerHeight
-        context.fill(x, y + headerHeight - 1, x + width, y + headerHeight, BORDER_COLOR)
+        context.fill(x + 1, y + 1, x + width - 1, y + HEADER_HEIGHT, HEADER_BG)
+        headerEndY = y + HEADER_HEIGHT
+        context.fill(x, y + HEADER_HEIGHT - 1, x + width, y + HEADER_HEIGHT, BORDER_COLOR)
 
         val arrow = if (isExpanded) "▼" else "▶"
-        drawText(context, arrow, (x + padding).toFloat(), (y + scaled(6)).toFloat(), TEXT_GOLD, scaled(0.85f))
-        drawText(context, "BATTLE INFO", (x + padding + scaled(12)).toFloat(), (y + scaled(6)).toFloat(),
-            TEXT_WHITE, scaled(0.85f))
+        val headerTextY = y + (HEADER_HEIGHT - (8 * textScale).toInt()) / 2
+        drawText(context, arrow, (x + PADDING).toFloat(), headerTextY.toFloat(), TEXT_GOLD, 0.85f * textScale)
+        drawText(context, "BATTLE INFO", (x + PADDING + (12 * textScale).toInt()).toFloat(), headerTextY.toFloat(), TEXT_WHITE, 0.85f * textScale)
 
         val turnText = "T${BattleStateTracker.currentTurn}"
-        drawText(context, turnText, (x + width - padding - scaled(turnText.length * 5)).toFloat(),
-            (y + scaled(6)).toFloat(), TEXT_GOLD, scaled(0.85f))
+        val charWidth = (5 * textScale).toInt()
+        drawText(context, turnText, (x + width - PADDING - turnText.length * charWidth).toFloat(),
+            headerTextY.toFloat(), TEXT_GOLD, 0.85f * textScale)
     }
 
     private fun renderSection(
@@ -431,13 +844,16 @@ object BattleInfoPanel {
         accentColor: Int,
         contentRenderer: (Int) -> Int
     ): Int {
-        val lineHeight = scaled(BASE_LINE_HEIGHT)
-        val padding = scaled(BASE_PADDING)
+        val sectionHeight = lineHeight + 1
+        context.fill(x + 1, y, x + width - 1, y + sectionHeight, SECTION_BG)
+        context.fill(x + 1, y, x + 3, y + sectionHeight, accentColor)
 
-        context.fill(x + 1, y, x + width - 1, y + lineHeight + 2, SECTION_BG)
-        context.fill(x + 1, y, x + 3, y + lineHeight + 2, accentColor)
-        drawText(context, title, (x + padding).toFloat(), (y + 2).toFloat(), accentColor, scaled(0.7f))
-        return contentRenderer(y + lineHeight + 4)
+        // Vertically center the title text in the section header
+        val textHeight = (8 * 0.7f * textScale).toInt()
+        val titleY = y + (sectionHeight - textHeight) / 2
+        drawText(context, title, (x + PADDING).toFloat(), titleY.toFloat(), accentColor, 0.7f * textScale)
+
+        return contentRenderer(y + sectionHeight + 1)
     }
 
     private fun drawConditionLine(
@@ -450,12 +866,12 @@ object BattleInfoPanel {
         info: String,
         accentColor: Int
     ) {
-        val textScale = scaled(0.8f)
-        drawText(context, icon, x.toFloat(), y.toFloat(), accentColor, textScale)
-        drawText(context, name, (x + scaled(14)).toFloat(), y.toFloat(), TEXT_LIGHT, textScale)
+        val charWidth = (5 * textScale).toInt()
+        drawText(context, icon, x.toFloat(), y.toFloat(), accentColor, 0.8f * textScale)
+        drawText(context, name, (x + (14 * textScale).toInt()).toFloat(), y.toFloat(), TEXT_LIGHT, 0.8f * textScale)
         if (info.isNotEmpty()) {
-            val infoWidth = scaled(info.length * 5)
-            drawText(context, info, (x + width - infoWidth).toFloat(), y.toFloat(), TEXT_DIM, scaled(0.75f))
+            val infoWidth = info.length * charWidth
+            drawText(context, info, (x + width - infoWidth).toFloat(), y.toFloat(), TEXT_DIM, 0.75f * textScale)
         }
     }
 
@@ -467,54 +883,97 @@ object BattleInfoPanel {
         context.fill(x + 1, y + h - 1, x + w - 1, y + h, borderColor)
     }
 
-    private fun calculateCollapsedHeight(): Int {
-        val padding = scaled(BASE_PADDING)
-        val lineHeight = scaled(BASE_LINE_HEIGHT)
-        val headerHeight = scaled(BASE_HEADER_HEIGHT)
+    private fun calculateCollapsedContentHeight(
+        pokemonWithStats: List<Triple<UUID, String, List<Map.Entry<com.cobblemon.mod.common.api.pokemon.stats.Stat, Int>>>>
+    ): Int {
+        var height = PADDING / 2
 
-        var height = headerHeight + padding
+        val hasWeather = BattleStateTracker.weather != null
+        val hasTerrain = BattleStateTracker.terrain != null
+        val fieldCount = BattleStateTracker.getFieldConditions().size
+        val playerConds = BattleStateTracker.getPlayerSideConditions()
+        val oppConds = BattleStateTracker.getOpponentSideConditions()
+        // Count only ACTIVE pokemon with stat changes
+        val statChangeCount = pokemonWithStats.count { (_, _, changedStats) ->
+            changedStats.isNotEmpty()
+        }
 
-        if (BattleStateTracker.weather != null) height += lineHeight
-        if (BattleStateTracker.terrain != null) height += lineHeight
-        height += BattleStateTracker.getFieldConditions().size * lineHeight
+        val hasAnyEffects = hasWeather || hasTerrain || fieldCount > 0 ||
+                           playerConds.isNotEmpty() || oppConds.isNotEmpty() || statChangeCount > 0
 
-        if (BattleStateTracker.getPlayerSideConditions().isNotEmpty()) height += (lineHeight * 0.9).toInt()
-        if (BattleStateTracker.getOpponentSideConditions().isNotEmpty()) height += (lineHeight * 0.9).toInt()
+        if (!hasAnyEffects) {
+            height += lineHeight  // "No effects" text
+        } else {
+            if (hasWeather) height += lineHeight
+            if (hasTerrain) height += lineHeight
+            height += fieldCount * lineHeight
+            if (playerConds.isNotEmpty()) height += (lineHeight * 0.9).toInt()
+            if (oppConds.isNotEmpty()) height += (lineHeight * 0.9).toInt()
+            if (statChangeCount > 0) height += (lineHeight * 0.9).toInt()
+        }
 
-        height += padding + scaled(10)
-
-        return height.coerceAtLeast(headerHeight + scaled(40))
+        return height
     }
 
-    private fun calculateExpandedHeight(pokemonCount: Int): Int {
-        val padding = scaled(BASE_PADDING)
-        val lineHeight = scaled(BASE_LINE_HEIGHT)
-        val headerHeight = scaled(BASE_HEADER_HEIGHT)
-        val sectionGap = scaled(BASE_SECTION_GAP)
+    private fun calculateExpandedContentHeight(
+        pokemonWithStats: List<Triple<UUID, String, List<Map.Entry<com.cobblemon.mod.common.api.pokemon.stats.Stat, Int>>>>,
+        panelWidth: Int
+    ): Int {
+        // Content starts at contentStartY (no initial gap - first section starts immediately)
+        var height = 0
 
-        var height = headerHeight + sectionGap
-
-        height += lineHeight + 4
+        // Field section
+        height += lineHeight + 2  // Section header (reduced)
         val fieldCount = listOfNotNull(BattleStateTracker.weather, BattleStateTracker.terrain).size +
                          BattleStateTracker.getFieldConditions().size
         height += (if (fieldCount > 0) fieldCount else 1) * lineHeight
-        height += sectionGap
+        height += SECTION_GAP
 
-        height += lineHeight + 4
+        // Ally section
+        height += lineHeight + 2  // Section header (reduced)
         val playerCount = BattleStateTracker.getPlayerSideConditions().size
         height += (if (playerCount > 0) playerCount else 1) * lineHeight
-        height += sectionGap
+        height += SECTION_GAP
 
-        height += lineHeight + 4
+        // Enemy section
+        height += lineHeight + 2  // Section header (reduced)
         val opponentCount = BattleStateTracker.getOpponentSideConditions().size
         height += (if (opponentCount > 0) opponentCount else 1) * lineHeight
-        height += sectionGap
 
-        height += lineHeight + 4
-        height += (pokemonCount * (lineHeight * 0.95)).toInt()
-        height += (pokemonCount * 2 * (lineHeight * 0.9)).toInt()
+        // Stats section - always shown
+        height += SECTION_GAP
+        height += lineHeight + 2  // Section header (reduced)
+        val pokemonWithChanges = pokemonWithStats.filter { it.third.isNotEmpty() }
+        if (pokemonWithChanges.isEmpty()) {
+            height += lineHeight  // "None active" text
+        } else {
+            // Calculate stat heights accurately using same logic as rendering
+            val contentWidth = panelWidth  // Don't subtract scrollbar space for initial calculation
+            val charWidth = (5 * textScale).toInt()
+            val startX = PADDING + (8 * textScale).toInt()
+            val maxX = contentWidth - PADDING
 
-        height += padding + scaled(10)
+            for ((_, _, changedStats) in pokemonWithChanges) {
+                height += (lineHeight * 0.95).toInt()  // Pokemon name
+
+                // Simulate wrapping to count actual lines needed
+                var statX = startX
+                val sortedStats = changedStats.sortedBy { getStatSortOrder(it.key.identifier.toString()) }
+
+                for ((stat, value) in sortedStats) {
+                    val abbr = getStatAbbr(stat.identifier.toString())
+                    val arrowCount = kotlin.math.abs(value)
+                    val entryWidth = ((abbr.length * charWidth) + 2 + (arrowCount * charWidth) + (8 * textScale)).toInt()
+
+                    if (statX + entryWidth > maxX && statX != startX) {
+                        height += (lineHeight * 0.9).toInt()  // Line wrap
+                        statX = startX
+                    }
+                    statX += entryWidth
+                }
+                height += (lineHeight * 0.9).toInt()  // Final line for this pokemon's stats
+            }
+        }
 
         return height
     }
@@ -549,13 +1008,13 @@ object BattleInfoPanel {
     private fun getStatSortOrder(identifier: String): Int {
         val id = identifier.lowercase()
         return when {
-            id.contains("attack") && id.contains("special") -> 2      // SpA
-            id.contains("attack") -> 0                                 // Atk
-            (id.contains("defense") || id.contains("defence")) && id.contains("special") -> 3  // SpD
-            id.contains("defense") || id.contains("defence") -> 1     // Def
-            id.contains("speed") -> 4                                  // Spe
-            id.contains("accuracy") -> 5                               // Acc
-            id.contains("evasion") -> 6                                // Eva
+            id.contains("attack") && id.contains("special") -> 2
+            id.contains("attack") -> 0
+            (id.contains("defense") || id.contains("defence")) && id.contains("special") -> 3
+            id.contains("defense") || id.contains("defence") -> 1
+            id.contains("speed") -> 4
+            id.contains("accuracy") -> 5
+            id.contains("evasion") -> 6
             else -> 7
         }
     }

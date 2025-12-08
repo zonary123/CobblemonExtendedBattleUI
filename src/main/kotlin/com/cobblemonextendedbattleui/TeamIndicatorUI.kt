@@ -18,13 +18,20 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object TeamIndicatorUI {
 
+    // Match Cobblemon's exact positioning constants from BattleOverlay.kt
     private const val HORIZONTAL_INSET = 12
     private const val VERTICAL_INSET = 10
-    private const val TILE_HEIGHT = 25
-    private const val VERTICAL_SPACING = 5
+
+    // Cobblemon tile dimensions (from BattleOverlay companion object)
+    private const val TILE_HEIGHT = 40
+    private const val COMPACT_TILE_HEIGHT = 28
+    private const val VERTICAL_SPACING = 40          // Spacing between tile starts (normal mode)
+    private const val COMPACT_VERTICAL_SPACING = 30  // Spacing between tile starts (compact mode, 3+ pokemon)
+
+    // Pokeball indicator settings
     private const val BALL_SIZE = 10
     private const val BALL_SPACING = 3
-    private const val BALL_OFFSET_Y = 4
+    private const val BALL_OFFSET_Y = 4  // Gap below the last tile
 
     // Colors
     private val COLOR_NORMAL_TOP = color(255, 80, 80)      // Red top half
@@ -119,7 +126,18 @@ object TeamIndicatorUI {
 
     private fun calculatePokeballY(activeCount: Int): Int {
         if (activeCount <= 0) return VERTICAL_INSET + TILE_HEIGHT + BALL_OFFSET_Y
-        return VERTICAL_INSET + (activeCount * TILE_HEIGHT) + ((activeCount - 1) * VERTICAL_SPACING) + BALL_OFFSET_Y
+
+        // Cobblemon uses compact mode when there are 3+ active pokemon on a side
+        val isCompact = activeCount >= 3
+        val tileHeight = if (isCompact) COMPACT_TILE_HEIGHT else TILE_HEIGHT
+
+        // Visual tile stacking appears much tighter than the VERTICAL_SPACING constants
+        // These values are empirically adjusted based on in-game testing
+        val effectiveSpacing = if (isCompact) 20 else 15
+
+        val bottomOfTiles = VERTICAL_INSET + (activeCount - 1) * effectiveSpacing + tileHeight
+
+        return bottomOfTiles + BALL_OFFSET_Y
     }
 
     private fun updateTrackedPokemon(battlePokemon: ClientBattlePokemon) {

@@ -27,10 +27,10 @@ Small pokeball indicators below each team's health bars showing:
 
 ## Controls
 
-- **V** - Show/hide the detailed panel
-- **Click the header** - Collapse or expand the panel
+- **V or Click header** - Show/hide the detailed panel
 - **Drag the header** - Move the panel anywhere on screen
-- **Scroll wheel** - Make the panel bigger or smaller
+- **CTRL + Scroll wheel** - Scroll up to increase font size, scroll down to decrease it
+- **Drag sides or corners** - Resize panel
 
 Your preferences are saved automatically.
 
