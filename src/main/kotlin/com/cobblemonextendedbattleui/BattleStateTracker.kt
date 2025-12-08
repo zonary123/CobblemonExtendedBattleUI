@@ -308,8 +308,6 @@ object BattleStateTracker {
 
     fun getStatChanges(uuid: UUID): Map<Stat, Int> = statChanges[uuid] ?: emptyMap()
 
-    fun getAllStatChanges(): Map<UUID, Map<Stat, Int>> = statChanges.toMap()
-
     private fun checkForExpiredConditions() {
         weather?.let { w ->
             val turnsElapsed = currentTurn - w.startTurn

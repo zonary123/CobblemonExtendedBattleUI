@@ -253,7 +253,6 @@ object BattleInfoPanel {
                     scrollbarDragStartOffset = PanelConfig.scrollOffset
                 }
                 isScrollbarDragging -> {
-                    val scrollbarY = headerEndY + 2
                     val scrollbarHeight = panelBoundsY + panelBoundsH - headerEndY - 4
                     val thumbHeight = ((visibleContentHeight.toFloat() / contentHeight) * scrollbarHeight).toInt().coerceAtLeast(20)
                     val trackHeight = scrollbarHeight - thumbHeight
@@ -459,7 +458,7 @@ object BattleInfoPanel {
             BattleStateTracker.registerPokemon(pokemon.uuid, pokemon.displayName.string)
         }
 
-        // Build pokemon data with stat changes for height calculation and rendering
+        // Build Pokemon data with stat changes for height calculation and rendering
         val pokemonWithStats = allPokemon.map { pokemon ->
             val stats = BattleStateTracker.getStatChanges(pokemon.uuid)
             val changedStats = stats.entries.filter { it.value != 0 }
@@ -623,7 +622,7 @@ object BattleInfoPanel {
         val playerConds = BattleStateTracker.getPlayerSideConditions()
         val oppConds = BattleStateTracker.getOpponentSideConditions()
 
-        // Count only ACTIVE pokemon with stat changes (not switched out or fainted)
+        // Count only ACTIVE Pokemon with stat changes (not switched out or fainted)
         val statChangeCount = pokemonWithStats.count { (_, _, changedStats) ->
             changedStats.isNotEmpty()
         }
@@ -920,7 +919,7 @@ object BattleInfoPanel {
         val fieldCount = BattleStateTracker.getFieldConditions().size
         val playerConds = BattleStateTracker.getPlayerSideConditions()
         val oppConds = BattleStateTracker.getOpponentSideConditions()
-        // Count only ACTIVE pokemon with stat changes
+        // Count only ACTIVE Pokemon with stat changes
         val statChangeCount = pokemonWithStats.count { (_, _, changedStats) ->
             changedStats.isNotEmpty()
         }
@@ -999,7 +998,7 @@ object BattleInfoPanel {
                     }
                     statX += entryWidth
                 }
-                height += (lineHeight * 0.9).toInt()  // Final line for this pokemon's stats
+                height += (lineHeight * 0.9).toInt()  // Final line for this Pokemon's stats
             }
         }
 

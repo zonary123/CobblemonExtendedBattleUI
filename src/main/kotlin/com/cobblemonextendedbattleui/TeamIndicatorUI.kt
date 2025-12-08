@@ -23,8 +23,6 @@ object TeamIndicatorUI {
     // Cobblemon tile dimensions (from BattleOverlay companion object)
     private const val TILE_HEIGHT = 40
     private const val COMPACT_TILE_HEIGHT = 28
-    private const val VERTICAL_SPACING = 40          // Spacing between tile starts (normal mode)
-    private const val COMPACT_VERTICAL_SPACING = 30  // Spacing between tile starts (compact mode, 3+ pokemon)
 
     // Pokeball indicator settings
     private const val BALL_SIZE = 10
@@ -125,7 +123,7 @@ object TeamIndicatorUI {
     private fun calculatePokeballY(activeCount: Int): Int {
         if (activeCount <= 0) return VERTICAL_INSET + TILE_HEIGHT + BALL_OFFSET_Y
 
-        // Cobblemon uses compact mode when there are 3+ active pokemon on a side
+        // Cobblemon uses compact mode when there are 3+ active Pokemon on a side
         val isCompact = activeCount >= 3
         val tileHeight = if (isCompact) COMPACT_TILE_HEIGHT else TILE_HEIGHT
 

@@ -17,7 +17,6 @@ object PanelConfig {
 
     // Base dimensions (default size)
     const val DEFAULT_WIDTH = 200
-    const val DEFAULT_HEIGHT = 250
 
     // Panel position (null = default right-center position)
     var panelX: Int? = null
@@ -116,15 +115,4 @@ object PanelConfig {
     fun getMaxWidth(screenWidth: Int): Int = (screenWidth * MAX_SCREEN_PERCENTAGE).toInt()
 
     fun getMaxHeight(screenHeight: Int): Int = (screenHeight * MAX_SCREEN_PERCENTAGE).toInt()
-
-    fun resetToDefaults() {
-        panelX = null
-        panelY = null
-        panelWidth = null
-        panelHeight = null
-        fontScale = 1.0f
-        startExpanded = false
-        scrollOffset = 0
-        save()
-    }
 }
