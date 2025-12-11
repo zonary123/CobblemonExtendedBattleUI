@@ -6,6 +6,8 @@ A client-side Fabric mod that adds helpful information displays to Cobblemon bat
 
 During Cobblemon battles, this mod shows you information that's normally hard to track:
 
+![Full Showcase](https://cdn.modrinth.com/data/cached_images/9e5142018dbd4a9f623b27a88be9b05b0b3c7a16.png)
+
 ### Battle Info Panel
 
 A panel on your screen that displays:
@@ -19,7 +21,11 @@ A panel on your screen that displays:
 
 The panel shows turn ranges like "5-8" when we don't know if the opponent has items that extend duration (like Light Clay for screens or weather rocks).
 
+![Battle Info Panel](https://cdn.modrinth.com/data/cached_images/13a0c887394fefc67ae8bc0c02cff379ee14c3fe_0.webp)
+
 This panel is also fully resizable, moveable, and collapsible if you only want to see a quick glance of relevant information!
+
+![Collapsed Small Panel](https://cdn.modrinth.com/data/cached_images/c44da2e05943ae06ca3f05eac2411dbc73ba4788_0.webp)
 
 ### Battle Log
 
@@ -39,6 +45,8 @@ Small pokeball indicators below each team's health bars showing:
 - How many Pokemon each side has (opponent's team is revealed as they send them out)
 - Which Pokemon have status conditions (colored pokeballs)
 - Which Pokemon have fainted (gray pokeballs)
+
+![Pokeball Showcase](https://cdn.modrinth.com/data/cached_images/5209e6c6d2840da41a911607ddf425533e2783eb.png)
 
 ### What this mod does NOT do
 
