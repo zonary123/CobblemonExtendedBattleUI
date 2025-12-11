@@ -1,12 +1,12 @@
 # Cobblemon Extended Battle UI
 
-A client-side Fabric mod that adds helpful information displays to Cobblemon battles.
+A client-side Fabric mod that adds helpful information displays to Cobblemon battles, as well as overhauling the default Battle Log.
 
 ## What does it do?
 
 During Cobblemon battles, this mod shows you information that's normally hard to track:
 
-![Full Showcase](https://cdn.modrinth.com/data/cached_images/9e5142018dbd4a9f623b27a88be9b05b0b3c7a16.png)
+![Full Showcase](https://cdn.modrinth.com/data/cached_images/b45609672a6332699d206939f4d3c4e98dfeab86.png)
 
 ### Battle Info Panel
 
@@ -17,7 +17,7 @@ A panel on your screen that displays:
 - **Your Side's Effects** - Screens (Reflect, Light Screen), hazards on your side, Tailwind, etc.
 - **Enemy's Effects** - Same as above, but for the opponent
 - **Stat Changes** - Shows every Pokemon's stat boosts and drops with easy-to-read arrows
-- **Volatile Effects** - Taunt, Encore, Perish Song, Confusion, and other per-Pokemon effects with turn timers
+- **Volatile Effects** - Taunt, Encore, Perish Song, Leech Seed, and other per-Pokemon effects
 
 The panel shows turn ranges like "5-8" when we don't know if the opponent has items that extend duration (like Light Clay for screens or weather rocks).
 
@@ -25,23 +25,26 @@ The panel shows turn ranges like "5-8" when we don't know if the opponent has it
 
 This panel is also fully resizable, moveable, and collapsible if you only want to see a quick glance of relevant information!
 
-![Collapsed Small Panel](https://cdn.modrinth.com/data/cached_images/c44da2e05943ae06ca3f05eac2411dbc73ba4788_0.webp)
+![Collapsed Panel](https://cdn.modrinth.com/data/cached_images/4c33d13050ade1bfd72ca63aa32103761bd01ce8.png)
 
 ### Battle Log
 
-A custom battle log that replaces Cobblemon's default log:
+We have also implemented a custom battle log that replaces Cobblemon's default log:
 
 - **Damage Percentages** - Shows how much damage each attack dealt (e.g., "→ 35% to Clefable")
 - **Healing Tracking** - Healing shown in green (e.g., "→ +15% to Charizard")
 - **Color-Coded Messages** - Different colors for moves, HP changes, effects, and field conditions
-- **Turn Separators** - Clear visual separation between turns
+- **Turn Separators** - Clear visual separation between turns to improve readability
 - **Auto-Scroll** - Follows new messages automatically, stops when you scroll up manually
 
 The battle log uses Cobblemon's native textures and is fully resizable, moveable, and has adjustable font size.
 
+![Battle Log](https://cdn.modrinth.com/data/cached_images/ae64946a56c0acbefa825fda45b51fe8f9e0cf02.png)
+
 ### Team Pokeballs
 
 Small pokeball indicators below each team's health bars showing:
+
 - How many Pokemon each side has (opponent's team is revealed as they send them out)
 - Which Pokemon have status conditions (colored pokeballs)
 - Which Pokemon have fainted (gray pokeballs)
@@ -50,7 +53,7 @@ Small pokeball indicators below each team's health bars showing:
 
 ### What this mod does NOT do
 
-This mod does not give you any information that you could not otherwise have obtained. Opposition team size, team members, stats, moves, etc... are not and will never will be in the scope for this mod. This mod is intended to only give any information that you could get via common knowledge, note taking, or reading the match log in a quick and easy way as a QOL upgrade.
+This mod does not give you any information that you could not otherwise have obtained. Opposition team size, team members, stats, moves, etc... are not and never will be in scope for this mod. This mod is intended to only give any information that you could get via common knowledge, note taking, or reading the match log in a quick and easy way as a QOL upgrade.
 
 ## Controls
 
