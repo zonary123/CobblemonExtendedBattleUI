@@ -6,7 +6,7 @@ A client-side Fabric mod that adds helpful information displays to Cobblemon bat
 
 During Cobblemon battles, this mod shows you information that's normally hard to track:
 
-![Full Showcase](https://cdn.modrinth.com/data/cached_images/b45609672a6332699d206939f4d3c4e98dfeab86.png)
+![Full Showcase](https://cdn.modrinth.com/data/cached_images/4874356335b16b6a3e608e102fefef72704362d7.png)
 
 ### Battle Info Panel
 
@@ -48,11 +48,11 @@ Pokemon model indicators below each team's health bars showing:
 - **Visual Models** - Each Pokemon displayed as a mini 3D model
 - **Hover Tooltips** - Hover over any Pokemon to see detailed information
 - **Your Pokemon** - Shows all moves and held items
-- **Opponent Pokemon** - Shows only revealed moves, items, stat changes, and effects
+- **Opponent Pokemon** - Shows only revealed pokemon, moves, items, stat changes, and effects
 - **Status Tracking** - Status conditions shown via color tinting on models
 - **KO Tracking** - Fainted Pokemon appear grayed out
 
-![Team Indicators](https://cdn.modrinth.com/data/cached_images/5209e6c6d2840da41a911607ddf425533e2783eb.png)
+![Team Indicators](https://cdn.modrinth.com/data/cached_images/c7a572a02b91b4e6a5c5cfbd8b50d0b74a2719ac.png)
 
 ### What this mod does NOT do
 
