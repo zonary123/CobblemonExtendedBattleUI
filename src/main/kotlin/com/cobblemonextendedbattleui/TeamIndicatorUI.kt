@@ -90,7 +90,11 @@ object TeamIndicatorUI {
         var isKO: Boolean,
         // For model rendering
         var speciesIdentifier: Identifier? = null,
-        var aspects: Set<String> = emptySet()
+        var aspects: Set<String> = emptySet(),
+        // Original form tracking for Transform/Impostor (Ditto)
+        var originalSpeciesIdentifier: Identifier? = null,
+        var originalAspects: Set<String> = emptySet(),
+        var isTransformed: Boolean = false
     )
 
     // Track Pokemon for both sides separately (for spectating and opponent tracking)
@@ -100,6 +104,18 @@ object TeamIndicatorUI {
     // Persistent KO tracking - Pokemon removed from activePokemon after fainting
     // still need to show as KO'd in pokeball indicators
     private val knockedOutPokemon = ConcurrentHashMap.newKeySet<UUID>()
+
+    // Pending transforms - queued when transform message arrives before Pokemon is tracked
+    // (handles Impostor ability where transform happens immediately on switch-in)
+    private val pendingTransforms = ConcurrentHashMap.newKeySet<UUID>()
+
+    // Track which Pokemon were active last frame (for detecting disappeared/KO'd Pokemon)
+    // Maps: isLeftSide -> Set of UUIDs that were in activePokemon
+    private val previouslyActiveUuids = ConcurrentHashMap<Boolean, MutableSet<UUID>>()
+
+    // Track recent switches to avoid marking switched Pokemon as KO
+    // Cleared each frame after processing
+    private val recentSwitches = ConcurrentHashMap.newKeySet<UUID>()
 
     // FloatingState cache for Pokemon model rendering (one per UUID)
     private val floatingStates = ConcurrentHashMap<UUID, FloatingState>()
@@ -182,6 +198,9 @@ object TeamIndicatorUI {
         trackedSide1Pokemon.clear()
         trackedSide2Pokemon.clear()
         knockedOutPokemon.clear()
+        pendingTransforms.clear()
+        previouslyActiveUuids.clear()
+        recentSwitches.clear()
         floatingStates.clear()
         pokeballBounds.clear()
         hoveredPokeball = null
@@ -222,6 +241,78 @@ object TeamIndicatorUI {
      * Check if a Pokemon is KO'd.
      */
     fun isPokemonKO(uuid: UUID): Boolean = knockedOutPokemon.contains(uuid) || BattleStateTracker.isKO(uuid)
+
+    /**
+     * Mark a Pokemon as transformed (Ditto via Transform/Impostor).
+     * Saves the original species so it can be restored when the Pokemon faints.
+     * If the Pokemon isn't tracked yet (Impostor triggers on switch-in), queues for later processing.
+     */
+    fun markPokemonAsTransformed(pokemonName: String) {
+        val uuid = BattleStateTracker.getPokemonUuid(pokemonName) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("TeamIndicatorUI: Unknown Pokemon '$pokemonName' for transform tracking")
+            return
+        }
+
+        // Find and update the tracked Pokemon
+        val tracked = trackedSide1Pokemon[uuid] ?: trackedSide2Pokemon[uuid]
+        if (tracked != null) {
+            applyTransformToTracked(tracked, pokemonName)
+        } else {
+            // Pokemon not tracked yet - queue for when it gets added
+            // This handles Impostor ability where transform message arrives before tracking
+            pendingTransforms.add(uuid)
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "TeamIndicatorUI: Queued pending transform for $pokemonName (UUID: $uuid)"
+            )
+        }
+    }
+
+    /**
+     * Apply transform status to a tracked Pokemon, saving its original form.
+     */
+    private fun applyTransformToTracked(tracked: TrackedPokemon, debugName: String) {
+        // Only save if not already transformed (first transformation)
+        if (!tracked.isTransformed) {
+            tracked.originalSpeciesIdentifier = tracked.speciesIdentifier
+            tracked.originalAspects = tracked.aspects
+            tracked.isTransformed = true
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "TeamIndicatorUI: Saved original form for $debugName: ${tracked.originalSpeciesIdentifier}"
+            )
+        }
+    }
+
+    /**
+     * Record that a Pokemon is switching out (not fainting).
+     * Called from BattleMessageInterceptor when switch/drag message arrives.
+     * This prevents the "disappeared from active" detection from marking it as KO.
+     */
+    fun recordPokemonSwitch(pokemonName: String) {
+        val uuid = BattleStateTracker.getPokemonUuid(pokemonName) ?: return
+        recentSwitches.add(uuid)
+        CobblemonExtendedBattleUI.LOGGER.debug("TeamIndicatorUI: Recorded switch for $pokemonName (UUID: $uuid)")
+    }
+
+    /**
+     * Clear transform status for a Pokemon (on switch-out).
+     * The Pokemon returns to its original form when it leaves the field.
+     */
+    fun clearTransformStatus(pokemonName: String) {
+        val uuid = BattleStateTracker.getPokemonUuid(pokemonName) ?: return
+
+        // Remove from pending if queued
+        pendingTransforms.remove(uuid)
+
+        // Clear transform status in tracked Pokemon
+        val tracked = trackedSide1Pokemon[uuid] ?: trackedSide2Pokemon[uuid]
+        if (tracked != null && tracked.isTransformed) {
+            tracked.isTransformed = false
+            // Don't clear originalSpeciesIdentifier - it's still the true original
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "TeamIndicatorUI: Cleared transform status for $pokemonName"
+            )
+        }
+    }
 
     fun render(context: DrawContext) {
         val battle = CobblemonClient.battle ?: return
@@ -265,8 +356,12 @@ object TeamIndicatorUI {
         // We must match this positioning for pokeballs to align with the battle tiles.
 
         // Update tracked Pokemon for both sides from battle data
-        updateTrackedPokemonForSide(battle.side1, trackedSide1Pokemon)
-        updateTrackedPokemonForSide(battle.side2, trackedSide2Pokemon)
+        // Side1 is always LEFT, Side2 is always RIGHT
+        updateTrackedPokemonForSide(battle.side1, trackedSide1Pokemon, isLeftSide = true)
+        updateTrackedPokemonForSide(battle.side2, trackedSide2Pokemon, isLeftSide = false)
+
+        // Clear recent switches after processing both sides
+        recentSwitches.clear()
 
         // Count active Pokemon for positioning (determines how many tiles are shown)
         val side1ActiveCount = battle.side1.actors.sumOf { it.activePokemon.size }
@@ -360,14 +455,39 @@ object TeamIndicatorUI {
 
     /**
      * Update tracked Pokemon for a battle side (used for opponent and spectator views).
+     * Also detects Pokemon that disappeared from activePokemon without a switch message,
+     * indicating they were KO'd (e.g., by Perish Song, Memento, Explosion).
      */
-    private fun updateTrackedPokemonForSide(side: ClientBattleSide, tracked: ConcurrentHashMap<UUID, TrackedPokemon>) {
+    private fun updateTrackedPokemonForSide(side: ClientBattleSide, tracked: ConcurrentHashMap<UUID, TrackedPokemon>, isLeftSide: Boolean) {
+        val currentlyActiveUuids = mutableSetOf<UUID>()
+
         for (actor in side.actors) {
             for (activePokemon in actor.activePokemon) {
                 val battlePokemon = activePokemon.battlePokemon ?: continue
+                currentlyActiveUuids.add(battlePokemon.uuid)
                 updateTrackedPokemonInMap(battlePokemon, tracked)
             }
         }
+
+        // Check for Pokemon that were active last frame but aren't anymore
+        val previousActive = previouslyActiveUuids[isLeftSide]
+        if (previousActive != null) {
+            for (uuid in previousActive) {
+                if (uuid !in currentlyActiveUuids && uuid !in recentSwitches) {
+                    // Pokemon disappeared from active without a switch message - likely KO'd
+                    val pokemon = tracked[uuid]
+                    if (pokemon != null && !pokemon.isKO && !isPokemonKO(uuid)) {
+                        CobblemonExtendedBattleUI.LOGGER.debug(
+                            "TeamIndicatorUI: Pokemon $uuid disappeared from active without switch - marking as KO"
+                        )
+                        markPokemonAsKO(uuid)
+                    }
+                }
+            }
+        }
+
+        // Update tracking for next frame
+        previouslyActiveUuids[isLeftSide] = currentlyActiveUuids
     }
 
     private fun calculateIndicatorY(activeCount: Int): Int {
@@ -393,6 +513,7 @@ object TeamIndicatorUI {
     /**
      * Update tracked Pokemon in the specified map.
      * Also adds to knockedOutPokemon set when HP reaches 0 for reliable KO tracking.
+     * Processes pending transforms for Impostor ability (transform before tracking).
      */
     private fun updateTrackedPokemonInMap(battlePokemon: ClientBattlePokemon, targetMap: ConcurrentHashMap<UUID, TrackedPokemon>) {
         val uuid = battlePokemon.uuid
@@ -418,21 +539,51 @@ object TeamIndicatorUI {
             knockedOutPokemon.add(uuid)
         }
 
+        // Check if this Pokemon has a pending transform (Impostor triggered before tracking)
+        val hasPendingTransform = pendingTransforms.remove(uuid)
+
         targetMap.compute(uuid) { _, existing ->
             if (existing != null) {
                 // Update existing - also check persistent KO set
                 existing.hpPercent = hpPercent
                 existing.status = status
                 existing.isKO = isKO || knockedOutPokemon.contains(uuid)
+                // Always update the current species (for transformed Pokemon, this shows the transformed form)
+                // The original form is tracked separately in originalSpeciesIdentifier
                 existing.speciesIdentifier = speciesId ?: existing.speciesIdentifier
                 existing.aspects = aspects.ifEmpty { existing.aspects }
                 existing
             } else {
-                // New Pokemon revealed - check persistent KO set
-                TrackedPokemon(uuid, hpPercent, status, isKO || knockedOutPokemon.contains(uuid), speciesId, aspects)
+                // New Pokemon revealed
+                // Check if transform was queued before we could track this Pokemon (Impostor ability)
+                val isTransformed = hasPendingTransform
+                // If pending transform, the current species is already transformed - original was Ditto
+                val originalSpecies = if (isTransformed) DITTO_SPECIES_ID else speciesId
+                val originalAspects = if (isTransformed) emptySet() else aspects
+
+                if (isTransformed) {
+                    CobblemonExtendedBattleUI.LOGGER.debug(
+                        "TeamIndicatorUI: Processing pending transform for UUID $uuid - original species: ditto, current: $speciesName"
+                    )
+                }
+
+                TrackedPokemon(
+                    uuid = uuid,
+                    hpPercent = hpPercent,
+                    status = status,
+                    isKO = isKO || knockedOutPokemon.contains(uuid),
+                    speciesIdentifier = speciesId,
+                    aspects = aspects,
+                    originalSpeciesIdentifier = originalSpecies,
+                    originalAspects = originalAspects,
+                    isTransformed = isTransformed
+                )
             }
         }
     }
+
+    // Ditto species identifier for transform reversion
+    private val DITTO_SPECIES_ID = Identifier.of("cobblemon", "ditto")
 
     /**
      * Draw a background panel behind the team's Pokemon models.
@@ -597,13 +748,24 @@ object TeamIndicatorUI {
             // Check both the tracked isKO flag and the persistent KO set
             val isKO = pokemon.isKO || isPokemonKO(pokemon.uuid)
 
+            // If Pokemon is KO'd and was transformed, revert to original form
+            val displaySpecies: Identifier?
+            val displayAspects: Set<String>
+            if (isKO && pokemon.isTransformed && pokemon.originalSpeciesIdentifier != null) {
+                displaySpecies = pokemon.originalSpeciesIdentifier
+                displayAspects = pokemon.originalAspects
+            } else {
+                displaySpecies = pokemon.speciesIdentifier
+                displayAspects = pokemon.aspects
+            }
+
             drawPokemonModel(
                 context = context,
                 x = x,
                 y = startY,
                 renderablePokemon = null,
-                speciesIdentifier = pokemon.speciesIdentifier,
-                aspects = pokemon.aspects,
+                speciesIdentifier = displaySpecies,
+                aspects = displayAspects,
                 uuid = pokemon.uuid,
                 isKO = isKO,
                 status = pokemon.status,

@@ -98,7 +98,7 @@ object BattleLog {
     // HP-related keys (damage, healing, fainting)
     private val HP_KEYS = setOf(
         "cobblemon.battle.damage",
-        "cobblemon.battle.faint",
+        "cobblemon.battle.fainted",
         "cobblemon.battle.heal",
         "cobblemon.battle.sethp",
         "cobblemon.battle.recoil",

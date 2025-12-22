@@ -243,10 +243,11 @@ object BattleMessageInterceptor {
     }
 
     private const val TURN_KEY = "cobblemon.battle.turn"
-    private const val FAINT_KEY = "cobblemon.battle.faint"
+    private const val FAINT_KEY = "cobblemon.battle.fainted"
     private const val SWITCH_KEY = "cobblemon.battle.switch"
     private const val DRAG_KEY = "cobblemon.battle.drag"  // Forced switch (e.g., Roar, Whirlwind)
     private const val PERISH_SONG_FIELD_KEY = "cobblemon.battle.fieldactivate.perishsong"  // Applies to all Pokemon
+    private const val TRANSFORM_KEY = "cobblemon.battle.transform"  // Ditto Transform/Impostor
 
     // Volatile status start keys
     private val VOLATILE_START_KEYS = mapOf(
@@ -601,12 +602,20 @@ object BattleMessageInterceptor {
                 return
             }
 
+            // Transform (Ditto) - mark the Pokemon as transformed for form reversion on faint
+            // Format: [transformer, target]
+            if (key == TRANSFORM_KEY) {
+                markPokemonTransformed(args)
+                return
+            }
+
             // Faint/switch clears stats and volatile statuses
             if (key == FAINT_KEY) {
                 markPokemonFainted(args)
                 return
             }
             if (key == SWITCH_KEY || key == DRAG_KEY) {
+                recordPokemonSwitch(args)
                 clearPokemonState(args)
                 return
             }
@@ -660,6 +669,24 @@ object BattleMessageInterceptor {
         BattleStateTracker.clearPokemonVolatilesByName(pokemonName)
     }
 
+    /**
+     * Record that a Pokemon is switching out (for KO detection).
+     * Called before clearPokemonState to notify TeamIndicatorUI that this
+     * Pokemon is switching, not fainting.
+     */
+    private fun recordPokemonSwitch(args: Array<out Any>) {
+        if (args.isEmpty()) return
+
+        val pokemonName = when (val arg0 = args[0]) {
+            is Text -> arg0.string
+            is String -> arg0
+            else -> arg0.toString()
+        }
+
+        // Notify TeamIndicatorUI that this Pokemon is switching (not KO'd)
+        TeamIndicatorUI.recordPokemonSwitch(pokemonName)
+    }
+
     private fun clearPokemonState(args: Array<out Any>) {
         if (args.isEmpty()) return
 
@@ -669,9 +696,35 @@ object BattleMessageInterceptor {
             else -> arg0.toString()
         }
 
-        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Clearing stats and volatiles for $pokemonName (switch)")
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Clearing stats, volatiles, and transform for $pokemonName (switch)")
         BattleStateTracker.clearPokemonStatsByName(pokemonName)
         BattleStateTracker.clearPokemonVolatilesByName(pokemonName)
+
+        // Clear transform status - Pokemon reverts to original form when switched out
+        BattleStateTracker.clearTransformStatusByName(pokemonName)
+        TeamIndicatorUI.clearTransformStatus(pokemonName)
+    }
+
+    /**
+     * Handle Transform (Ditto) - mark the transforming Pokemon for later form reversion.
+     * Args: [transformer, target] - transformer transformed into target
+     */
+    private fun markPokemonTransformed(args: Array<out Any>) {
+        if (args.isEmpty()) return
+
+        val pokemonName = when (val arg0 = args[0]) {
+            is Text -> arg0.string
+            is String -> arg0
+            else -> arg0.toString()
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Pokemon transformed - $pokemonName")
+
+        // Mark in BattleStateTracker for form reversion on faint
+        BattleStateTracker.markAsTransformed(pokemonName)
+
+        // Notify TeamIndicatorUI to track the transformation
+        TeamIndicatorUI.markPokemonAsTransformed(pokemonName)
     }
 
     private fun argToString(arg: Any): String {

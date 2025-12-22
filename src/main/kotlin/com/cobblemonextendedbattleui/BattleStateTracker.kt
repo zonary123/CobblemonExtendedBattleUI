@@ -238,6 +238,7 @@ object BattleStateTracker {
         batonPassUsers.clear()
         pokemonItems.clear()
         knockedOutPokemon.clear()
+        transformedPokemon.clear()
         revealedMoves.clear()
         BattleMessageInterceptor.clearMoveTracking()
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared all state")
@@ -549,6 +550,13 @@ object BattleStateTracker {
         val effectiveStartTurn = maxOf(1, currentTurn)
         val statuses = volatileStatuses.computeIfAbsent(uuid) { ConcurrentHashMap.newKeySet() }
 
+        // Perish Song has an absolute countdown - don't reset startTurn if already applied
+        // (Cobblemon sends "start.perish" messages each turn as the counter decrements)
+        if (type == VolatileStatus.PERISH_SONG && statuses.any { it.type == VolatileStatus.PERISH_SONG }) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName already has Perish Song, keeping original startTurn")
+            return
+        }
+
         // Remove any existing status of the same type before adding (in case of refresh)
         statuses.removeIf { it.type == type }
         statuses.add(VolatileStatusState(type, effectiveStartTurn))
@@ -580,9 +588,12 @@ object BattleStateTracker {
         val turnsElapsed = currentTurn - state.startTurn
 
         return if (state.type.countsDown) {
-            // Countdown display (e.g., Perish Song: 3, 2, 1)
-            val countdown = (duration - 1) - turnsElapsed  // -1 because it starts at 3, not 4
-            countdown.coerceAtLeast(0).toString()
+            // Countdown display (e.g., Perish Song: 3, 2, 1, 0)
+            // Perish Song starts at 3 at end of turn used, decrements each subsequent turn
+            // turnsElapsed=1 means we're on the turn after it was used, counter should be 3
+            // turnsElapsed=2 means counter should be 2, etc.
+            val countdown = (duration - turnsElapsed).coerceIn(0, duration - 1)
+            countdown.toString()
         } else {
             // Turns remaining display
             val remaining = duration - turnsElapsed
@@ -723,6 +734,9 @@ object BattleStateTracker {
     // the Pokemon is removed from activePokemon
     private val knockedOutPokemon = ConcurrentHashMap.newKeySet<UUID>()
 
+    // Track transformed Pokemon (Ditto via Transform/Impostor) - used to revert form on faint
+    private val transformedPokemon = ConcurrentHashMap.newKeySet<UUID>()
+
     /**
      * Set or update an item for a Pokemon.
      */
@@ -832,6 +846,52 @@ object BattleStateTracker {
      */
     fun getPokemonUuid(pokemonName: String, preferAlly: Boolean? = null): UUID? {
         return resolvePokemonUuid(pokemonName, preferAlly)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Transform Tracking (Ditto)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Mark a Pokemon as transformed (via Transform move or Impostor ability).
+     * Used by TeamIndicatorUI to know when to revert form display on faint.
+     */
+    fun markAsTransformed(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for transform tracking")
+            return
+        }
+        markAsTransformed(uuid)
+    }
+
+    /**
+     * Mark a Pokemon as transformed by UUID.
+     */
+    fun markAsTransformed(uuid: UUID) {
+        transformedPokemon.add(uuid)
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Marked UUID $uuid as transformed")
+    }
+
+    /**
+     * Check if a Pokemon is currently transformed.
+     */
+    fun isTransformed(uuid: UUID): Boolean = transformedPokemon.contains(uuid)
+
+    /**
+     * Clear transform status for a Pokemon (on switch or faint).
+     */
+    fun clearTransformStatus(uuid: UUID) {
+        if (transformedPokemon.remove(uuid)) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared transform status for UUID $uuid")
+        }
+    }
+
+    /**
+     * Clear transform status for a Pokemon by name.
+     */
+    fun clearTransformStatusByName(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return
+        clearTransformStatus(uuid)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
