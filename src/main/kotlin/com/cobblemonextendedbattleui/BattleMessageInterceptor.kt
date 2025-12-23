@@ -615,7 +615,6 @@ object BattleMessageInterceptor {
                 return
             }
             if (key == SWITCH_KEY || key == DRAG_KEY) {
-                recordPokemonSwitch(args)
                 clearPokemonState(args)
                 return
             }
@@ -667,24 +666,6 @@ object BattleMessageInterceptor {
         // Clear stats and volatiles
         BattleStateTracker.clearPokemonStatsByName(pokemonName)
         BattleStateTracker.clearPokemonVolatilesByName(pokemonName)
-    }
-
-    /**
-     * Record that a Pokemon is switching out (for KO detection).
-     * Called before clearPokemonState to notify TeamIndicatorUI that this
-     * Pokemon is switching, not fainting.
-     */
-    private fun recordPokemonSwitch(args: Array<out Any>) {
-        if (args.isEmpty()) return
-
-        val pokemonName = when (val arg0 = args[0]) {
-            is Text -> arg0.string
-            is String -> arg0
-            else -> arg0.toString()
-        }
-
-        // Notify TeamIndicatorUI that this Pokemon is switching (not KO'd)
-        TeamIndicatorUI.recordPokemonSwitch(pokemonName)
     }
 
     private fun clearPokemonState(args: Array<out Any>) {

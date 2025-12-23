@@ -113,10 +113,6 @@ object TeamIndicatorUI {
     // Maps: isLeftSide -> Set of UUIDs that were in activePokemon
     private val previouslyActiveUuids = ConcurrentHashMap<Boolean, MutableSet<UUID>>()
 
-    // Track recent switches to avoid marking switched Pokemon as KO
-    // Cleared each frame after processing
-    private val recentSwitches = ConcurrentHashMap.newKeySet<UUID>()
-
     // FloatingState cache for Pokemon model rendering (one per UUID)
     private val floatingStates = ConcurrentHashMap<UUID, FloatingState>()
 
@@ -200,7 +196,6 @@ object TeamIndicatorUI {
         knockedOutPokemon.clear()
         pendingTransforms.clear()
         previouslyActiveUuids.clear()
-        recentSwitches.clear()
         floatingStates.clear()
         pokeballBounds.clear()
         hoveredPokeball = null
@@ -283,17 +278,6 @@ object TeamIndicatorUI {
     }
 
     /**
-     * Record that a Pokemon is switching out (not fainting).
-     * Called from BattleMessageInterceptor when switch/drag message arrives.
-     * This prevents the "disappeared from active" detection from marking it as KO.
-     */
-    fun recordPokemonSwitch(pokemonName: String) {
-        val uuid = BattleStateTracker.getPokemonUuid(pokemonName) ?: return
-        recentSwitches.add(uuid)
-        CobblemonExtendedBattleUI.LOGGER.debug("TeamIndicatorUI: Recorded switch for $pokemonName (UUID: $uuid)")
-    }
-
-    /**
      * Clear transform status for a Pokemon (on switch-out).
      * The Pokemon returns to its original form when it leaves the field.
      */
@@ -359,9 +343,6 @@ object TeamIndicatorUI {
         // Side1 is always LEFT, Side2 is always RIGHT
         updateTrackedPokemonForSide(battle.side1, trackedSide1Pokemon, isLeftSide = true)
         updateTrackedPokemonForSide(battle.side2, trackedSide2Pokemon, isLeftSide = false)
-
-        // Clear recent switches after processing both sides
-        recentSwitches.clear()
 
         // Count active Pokemon for positioning (determines how many tiles are shown)
         val side1ActiveCount = battle.side1.actors.sumOf { it.activePokemon.size }
@@ -472,15 +453,34 @@ object TeamIndicatorUI {
         // Check for Pokemon that were active last frame but aren't anymore
         val previousActive = previouslyActiveUuids[isLeftSide]
         if (previousActive != null) {
+            // Key insight: if a Pokemon left AND a new Pokemon appeared on this side,
+            // it was a switch (or faint + replacement). If a Pokemon left but no new
+            // one appeared, it was a KO with no replacement available.
+            //
+            // We do NOT check switchMessageReceived here because of a race condition:
+            // the battle state (activePokemon) can update before the switch message is processed.
+            // The presence of a new Pokemon on the same side is sufficient evidence of a switch.
+            val newPokemonAppearedOnThisSide = currentlyActiveUuids.any { it !in previousActive }
+
             for (uuid in previousActive) {
-                if (uuid !in currentlyActiveUuids && uuid !in recentSwitches) {
-                    // Pokemon disappeared from active without a switch message - likely KO'd
-                    val pokemon = tracked[uuid]
-                    if (pokemon != null && !pokemon.isKO && !isPokemonKO(uuid)) {
+                if (uuid !in currentlyActiveUuids) {
+                    // Pokemon left the active slot on this side
+                    if (newPokemonAppearedOnThisSide) {
+                        // A new Pokemon appeared on this side - the old one was replaced
+                        // Don't auto-mark as KO; if it fainted, the faint message handles it
                         CobblemonExtendedBattleUI.LOGGER.debug(
-                            "TeamIndicatorUI: Pokemon $uuid disappeared from active without switch - marking as KO"
+                            "TeamIndicatorUI: Pokemon $uuid left active (replaced by new Pokemon on ${if (isLeftSide) "left" else "right"} side)"
                         )
-                        markPokemonAsKO(uuid)
+                    } else if (!isPokemonKO(uuid)) {
+                        // No new Pokemon appeared - this was a KO with no replacement
+                        // (last Pokemon fainted, or self-KO move like Explosion/Memento)
+                        val pokemon = tracked[uuid]
+                        if (pokemon != null && !pokemon.isKO) {
+                            CobblemonExtendedBattleUI.LOGGER.debug(
+                                "TeamIndicatorUI: Pokemon $uuid disappeared with no replacement - marking as KO"
+                            )
+                            markPokemonAsKO(uuid)
+                        }
                     }
                 }
             }
