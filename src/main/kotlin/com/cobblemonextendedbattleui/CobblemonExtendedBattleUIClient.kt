@@ -22,6 +22,7 @@ object CobblemonExtendedBattleUIClient : ClientModInitializer {
         BattleInfoPanel.initialize()
         registerKeybindings()
         registerHudRenderer()
+        UpdateChecker.checkForUpdates()
 
         CobblemonExtendedBattleUI.LOGGER.info("Cobblemon Extended Battle UI Client initialized!")
     }

@@ -47,5 +47,10 @@
   "suggests": {
     "modmenu": "*",
     "cloth-config": "*"
+  },
+  "custom": {
+    "modmenu": {
+      "update_checker": true
+    }
   }
 }
