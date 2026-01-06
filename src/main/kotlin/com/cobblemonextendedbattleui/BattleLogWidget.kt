@@ -61,6 +61,24 @@ object BattleLogWidget {
 
     private fun color(r: Int, g: Int, b: Int, a: Int = 255): Int = (a shl 24) or (r shl 16) or (g shl 8) or b
 
+    /**
+     * Applies the current opacity (minimized state) to a color's alpha channel.
+     */
+    private fun applyOpacity(color: Int): Int {
+        if (!isMinimised) return color
+        val a = ((color shr 24) and 0xFF)
+        val r = (color shr 16) and 0xFF
+        val g = (color shr 8) and 0xFF
+        val b = color and 0xFF
+        val newA = (a * MINIMISED_OPACITY).toInt()
+        return (newA shl 24) or (r shl 16) or (g shl 8) or b
+    }
+
+    /**
+     * Gets the current opacity multiplier based on minimized state.
+     */
+    private fun getCurrentOpacity(): Float = if (isMinimised) MINIMISED_OPACITY else 1f
+
     // Text colors
     private val TEXT_DIM = color(150, 160, 175)
 
@@ -85,9 +103,16 @@ object BattleLogWidget {
     private val RESIZE_HANDLE_HOVER = color(120, 150, 190, 255)
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Opacity for minimized state (matches Cobblemon's BattleOverlay behavior)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private const val MINIMISED_OPACITY = 0.5f
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // State
     // ═══════════════════════════════════════════════════════════════════════════
 
+    private var isMinimised: Boolean = false
     private var scrollOffset: Int = 0
     private var contentHeight: Int = 0
     private var visibleHeight: Int = 0
@@ -164,14 +189,19 @@ object BattleLogWidget {
     fun render(context: DrawContext) {
         if (!PanelConfig.enableBattleLog) return
         val battle = CobblemonClient.battle ?: return
-        if (battle.minimised) return
+
+        // Track minimized state - render greyed out instead of hiding
+        isMinimised = battle.minimised
 
         val mc = MinecraftClient.getInstance()
 
         // Update line height based on font scale
         lineHeight = (BASE_LINE_HEIGHT * PanelConfig.logFontScale).toInt().coerceAtLeast(8)
 
-        handleInput(mc)
+        // Skip input handling when minimized (read-only)
+        if (!isMinimised) {
+            handleInput(mc)
+        }
 
         val screenWidth = mc.window.scaledWidth
         val screenHeight = mc.window.scaledHeight
@@ -198,6 +228,13 @@ object BattleLogWidget {
         widgetW = width
         widgetH = height
 
+        // Apply opacity for minimized state (greys out like Cobblemon's BattleOverlay)
+        // Must enable blending for texture alpha to work correctly
+        val opacity = getCurrentOpacity()
+        RenderSystem.enableBlend()
+        RenderSystem.defaultBlendFunc()
+        RenderSystem.setShaderColor(1f, 1f, 1f, opacity)
+
         // Render frame using 9-slice with Cobblemon textures
         renderFrame9Slice(context, x, y, width, height, isExpanded)
         // Flush texture batch before any fill operations
@@ -207,14 +244,18 @@ object BattleLogWidget {
         // Always render the same content - "collapsed" is just a smaller preset size
         renderContent(context, x, y, width, height)
 
-        // Resize handles only when expanded (full size mode allows resizing)
-        if (isExpanded && (hoveredZone != UIUtils.ResizeZone.NONE || isResizing)) {
+        // Resize handles only when expanded and not minimized (minimized = read-only)
+        if (!isMinimised && isExpanded && (hoveredZone != UIUtils.ResizeZone.NONE || isResizing)) {
             renderResizeHandles(context, x, y, width, height)
         }
+
+        // Reset shader color to default
+        RenderSystem.setShaderColor(1f, 1f, 1f, 1f)
     }
 
     fun onScroll(mouseX: Double, mouseY: Double, deltaY: Double): Boolean {
         if (!PanelConfig.enableBattleLog) return false
+        if (isMinimised) return false  // Read-only when minimized
 
         val mc = MinecraftClient.getInstance()
         val scaledX = (mouseX * mc.window.scaledWidth / mc.window.width).toInt()
@@ -908,8 +949,9 @@ object BattleLogWidget {
         // Subtle horizontal lines
         RenderSystem.enableBlend()
         RenderSystem.defaultBlendFunc()
-        context.fill(x, centerY, lineEndLeft.coerceAtLeast(x), centerY + 1, TURN_LINE_COLOR)
-        context.fill(lineStartRight.coerceAtMost(x + width), centerY, x + width, centerY + 1, TURN_LINE_COLOR)
+        val lineColor = applyOpacity(TURN_LINE_COLOR)
+        context.fill(x, centerY, lineEndLeft.coerceAtLeast(x), centerY + 1, lineColor)
+        context.fill(lineStartRight.coerceAtMost(x + width), centerY, x + width, centerY + 1, lineColor)
 
         // Centered turn text
         drawText(context, turnText, textX.toFloat(), (y + 1).toFloat(), TURN_TEXT_COLOR, fontScale)
@@ -925,7 +967,7 @@ object BattleLogWidget {
         scrollbarHeight = height
 
         // Background track
-        context.fill(x, y, x + SCROLLBAR_WIDTH, y + height, SCROLLBAR_BG)
+        context.fill(x, y, x + SCROLLBAR_WIDTH, y + height, applyOpacity(SCROLLBAR_BG))
 
         // Thumb
         val thumbHeight = ((visibleHeight.toFloat() / contentHeight) * height).toInt().coerceAtLeast(10)
@@ -937,7 +979,7 @@ object BattleLogWidget {
         scrollbarThumbY = thumbY
         scrollbarThumbHeight = thumbHeight
 
-        context.fill(x, thumbY, x + SCROLLBAR_WIDTH, thumbY + thumbHeight, SCROLLBAR_THUMB)
+        context.fill(x, thumbY, x + SCROLLBAR_WIDTH, thumbY + thumbHeight, applyOpacity(SCROLLBAR_THUMB))
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -963,7 +1005,7 @@ object BattleLogWidget {
             x = x,
             y = y,
             scale = scale,
-            colour = color,
+            colour = applyOpacity(color),
             shadow = true
         )
     }

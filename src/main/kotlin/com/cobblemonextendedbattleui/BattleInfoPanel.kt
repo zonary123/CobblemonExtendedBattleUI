@@ -14,6 +14,23 @@ import java.util.UUID
  */
 object BattleInfoPanel {
 
+    // Opacity for minimized state (matches Cobblemon's BattleOverlay behavior)
+    private const val MINIMISED_OPACITY = 0.5f
+    private var isMinimised: Boolean = false
+
+    /**
+     * Applies the current opacity (minimized state) to a color's alpha channel.
+     */
+    private fun applyOpacity(color: Int): Int {
+        if (!isMinimised) return color
+        val a = ((color shr 24) and 0xFF)
+        val r = (color shr 16) and 0xFF
+        val g = (color shr 8) and 0xFF
+        val b = color and 0xFF
+        val newA = (a * MINIMISED_OPACITY).toInt()
+        return (newA shl 24) or (r shl 16) or (g shl 8) or b
+    }
+
     // Panel state
     var isExpanded: Boolean = false
         private set
@@ -447,7 +464,8 @@ object BattleInfoPanel {
             return
         }
 
-        if (battle.minimised) return
+        // Track minimized state - render greyed out instead of hiding
+        isMinimised = battle.minimised
 
         // Mark that we're now in a battle
         wasInBattle = true
@@ -456,7 +474,11 @@ object BattleInfoPanel {
         BattleStateTracker.checkBattleChanged(battle.battleId)
 
         val mc = MinecraftClient.getInstance()
-        handleInput(mc)
+
+        // Skip input handling when minimized (read-only)
+        if (!isMinimised) {
+            handleInput(mc)
+        }
 
         val screenWidth = mc.window.scaledWidth
         val screenHeight = mc.window.scaledHeight
@@ -582,12 +604,14 @@ object BattleInfoPanel {
             renderCollapsed(context, clampedX, clampedY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData, playerSideNames, opponentSideNames)
         }
 
-        // Draw resize handles in both expanded and collapsed modes
-        drawResizeHandles(context, clampedX, clampedY, panelWidth, panelHeight)
+        // Draw resize handles in both expanded and collapsed modes (skip when minimized)
+        if (!isMinimised) {
+            drawResizeHandles(context, clampedX, clampedY, panelWidth, panelHeight)
+        }
     }
 
     private fun drawResizeHandles(context: DrawContext, x: Int, y: Int, w: Int, h: Int) {
-        val handleColor = if (hoveredZone != UIUtils.ResizeZone.NONE || isResizing) RESIZE_HANDLE_HOVER else RESIZE_HANDLE_COLOR
+        val handleColor = applyOpacity(if (hoveredZone != UIUtils.ResizeZone.NONE || isResizing) RESIZE_HANDLE_HOVER else RESIZE_HANDLE_COLOR)
         val cornerLength = 12
         val thickness = 2
 
@@ -612,7 +636,7 @@ object BattleInfoPanel {
     private fun renderScrollbar(context: DrawContext, x: Int, y: Int, height: Int) {
         if (contentHeight <= visibleContentHeight) return
 
-        context.fill(x, y, x + SCROLLBAR_WIDTH, y + height, SCROLLBAR_BG)
+        context.fill(x, y, x + SCROLLBAR_WIDTH, y + height, applyOpacity(SCROLLBAR_BG))
 
         // Calculate thumb height with a smaller minimum, and ensure it doesn't exceed available space
         val minThumbHeight = (height / 4).coerceIn(6, 20)
@@ -623,7 +647,7 @@ object BattleInfoPanel {
         val thumbY = y + ((height - thumbHeight) * scrollRatio).toInt()
 
         val thumbColor = if (isOverScrollbar || isScrollbarDragging) SCROLLBAR_THUMB_HOVER else SCROLLBAR_THUMB
-        context.fill(x, thumbY, x + SCROLLBAR_WIDTH, thumbY + thumbHeight, thumbColor)
+        context.fill(x, thumbY, x + SCROLLBAR_WIDTH, thumbY + thumbHeight, applyOpacity(thumbColor))
     }
 
     private fun renderCollapsed(
@@ -966,9 +990,9 @@ object BattleInfoPanel {
     }
 
     private fun renderHeader(context: DrawContext, x: Int, y: Int, width: Int) {
-        context.fill(x + 1, y + 1, x + width - 1, y + HEADER_HEIGHT, HEADER_BG)
+        context.fill(x + 1, y + 1, x + width - 1, y + HEADER_HEIGHT, applyOpacity(HEADER_BG))
         headerEndY = y + HEADER_HEIGHT
-        context.fill(x, y + HEADER_HEIGHT - 1, x + width, y + HEADER_HEIGHT, BORDER_COLOR)
+        context.fill(x, y + HEADER_HEIGHT - 1, x + width, y + HEADER_HEIGHT, applyOpacity(BORDER_COLOR))
 
         val headerTextY = y + (HEADER_HEIGHT - (8 * textScale).toInt()) / 2
 
@@ -1005,8 +1029,8 @@ object BattleInfoPanel {
         contentRenderer: (Int) -> Int
     ): Int {
         val sectionHeight = lineHeight + 1
-        context.fill(x + 1, y, x + width - 1, y + sectionHeight, SECTION_BG)
-        context.fill(x + 1, y, x + 3, y + sectionHeight, accentColor)
+        context.fill(x + 1, y, x + width - 1, y + sectionHeight, applyOpacity(SECTION_BG))
+        context.fill(x + 1, y, x + 3, y + sectionHeight, applyOpacity(accentColor))
 
         // Vertically center the title text in the section header
         val textHeight = (8 * 0.7f * textScale).toInt()
@@ -1036,11 +1060,11 @@ object BattleInfoPanel {
     }
 
     private fun drawRoundedRect(context: DrawContext, x: Int, y: Int, w: Int, h: Int, fillColor: Int, borderColor: Int) {
-        context.fill(x + 1, y + 1, x + w - 1, y + h - 1, fillColor)
-        context.fill(x, y + 1, x + 1, y + h - 1, borderColor)
-        context.fill(x + w - 1, y + 1, x + w, y + h - 1, borderColor)
-        context.fill(x + 1, y, x + w - 1, y + 1, borderColor)
-        context.fill(x + 1, y + h - 1, x + w - 1, y + h, borderColor)
+        context.fill(x + 1, y + 1, x + w - 1, y + h - 1, applyOpacity(fillColor))
+        context.fill(x, y + 1, x + 1, y + h - 1, applyOpacity(borderColor))
+        context.fill(x + w - 1, y + 1, x + w, y + h - 1, applyOpacity(borderColor))
+        context.fill(x + 1, y, x + w - 1, y + 1, applyOpacity(borderColor))
+        context.fill(x + 1, y + h - 1, x + w - 1, y + h, applyOpacity(borderColor))
     }
 
     private fun calculateCollapsedContentHeight(
@@ -1187,11 +1211,11 @@ object BattleInfoPanel {
     }
 
     private fun drawText(context: DrawContext, text: String, x: Float, y: Float, color: Int, scale: Float) {
-        UIUtils.drawText(context, text, x, y, color, scale)
+        UIUtils.drawText(context, text, x, y, applyOpacity(color), scale)
     }
 
     private fun drawTextClipped(context: DrawContext, text: String, x: Float, y: Float, color: Int, scale: Float) {
-        UIUtils.drawTextClipped(context, text, x, y, color, scale, scissorBounds)
+        UIUtils.drawTextClipped(context, text, x, y, applyOpacity(color), scale, scissorBounds)
     }
 
     private fun getStatSortOrderFromBattleStat(stat: BattleStateTracker.BattleStat): Int {

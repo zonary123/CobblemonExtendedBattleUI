@@ -85,6 +85,23 @@ object TeamIndicatorUI {
 
     private fun color(r: Int, g: Int, b: Int, a: Int = 255): Int = (a shl 24) or (r shl 16) or (g shl 8) or b
 
+    // Opacity for minimized state (matches Cobblemon's BattleOverlay behavior)
+    private const val MINIMISED_OPACITY = 0.5f
+    private var isMinimised: Boolean = false
+
+    /**
+     * Applies the current opacity (minimized state) to a color's alpha channel.
+     */
+    private fun applyOpacity(color: Int): Int {
+        if (!isMinimised) return color
+        val a = ((color shr 24) and 0xFF)
+        val r = (color shr 16) and 0xFF
+        val g = (color shr 8) and 0xFF
+        val b = color and 0xFF
+        val newA = (a * MINIMISED_OPACITY).toInt()
+        return (newA shl 24) or (r shl 16) or (g shl 8) or b
+    }
+
     // Track Pokemon as they're revealed in battle
     data class TrackedPokemon(
         val uuid: UUID,
@@ -561,7 +578,9 @@ object TeamIndicatorUI {
 
     fun render(context: DrawContext) {
         val battle = CobblemonClient.battle ?: return
-        if (battle.minimised) return
+
+        // Track minimized state - render greyed out instead of hiding
+        isMinimised = battle.minimised
 
         // Clear tracking if this is a new battle
         if (lastBattleId != battle.battleId) {
@@ -878,50 +897,54 @@ object TeamIndicatorUI {
         val panelX = x - PANEL_PADDING_H
         val panelY = y - PANEL_PADDING_V
 
+        // Apply opacity for minimized state
+        val bg = applyOpacity(PANEL_BG)
+        val border = applyOpacity(PANEL_BORDER)
+
         // Draw main background (cross pattern for rounded corners)
-        context.fill(panelX + PANEL_CORNER, panelY, panelX + panelWidth - PANEL_CORNER, panelY + panelHeight, PANEL_BG)
-        context.fill(panelX, panelY + PANEL_CORNER, panelX + panelWidth, panelY + panelHeight - PANEL_CORNER, PANEL_BG)
+        context.fill(panelX + PANEL_CORNER, panelY, panelX + panelWidth - PANEL_CORNER, panelY + panelHeight, bg)
+        context.fill(panelX, panelY + PANEL_CORNER, panelX + panelWidth, panelY + panelHeight - PANEL_CORNER, bg)
 
         // Fill corners with graduated rounding (creates smooth curve)
         // Top-left corner
-        context.fill(panelX + 2, panelY + 1, panelX + PANEL_CORNER, panelY + 2, PANEL_BG)
-        context.fill(panelX + 1, panelY + 2, panelX + PANEL_CORNER, panelY + PANEL_CORNER, PANEL_BG)
+        context.fill(panelX + 2, panelY + 1, panelX + PANEL_CORNER, panelY + 2, bg)
+        context.fill(panelX + 1, panelY + 2, panelX + PANEL_CORNER, panelY + PANEL_CORNER, bg)
         // Top-right corner
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + 1, panelX + panelWidth - 2, panelY + 2, PANEL_BG)
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + 2, panelX + panelWidth - 1, panelY + PANEL_CORNER, PANEL_BG)
+        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + 1, panelX + panelWidth - 2, panelY + 2, bg)
+        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + 2, panelX + panelWidth - 1, panelY + PANEL_CORNER, bg)
         // Bottom-left corner
-        context.fill(panelX + 2, panelY + panelHeight - 2, panelX + PANEL_CORNER, panelY + panelHeight - 1, PANEL_BG)
-        context.fill(panelX + 1, panelY + panelHeight - PANEL_CORNER, panelX + PANEL_CORNER, panelY + panelHeight - 2, PANEL_BG)
+        context.fill(panelX + 2, panelY + panelHeight - 2, panelX + PANEL_CORNER, panelY + panelHeight - 1, bg)
+        context.fill(panelX + 1, panelY + panelHeight - PANEL_CORNER, panelX + PANEL_CORNER, panelY + panelHeight - 2, bg)
         // Bottom-right corner
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + panelHeight - 2, panelX + panelWidth - 2, panelY + panelHeight - 1, PANEL_BG)
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + panelHeight - PANEL_CORNER, panelX + panelWidth - 1, panelY + panelHeight - 2, PANEL_BG)
+        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + panelHeight - 2, panelX + panelWidth - 2, panelY + panelHeight - 1, bg)
+        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + panelHeight - PANEL_CORNER, panelX + panelWidth - 1, panelY + panelHeight - 2, bg)
 
         // Draw border - top
-        context.fill(panelX + PANEL_CORNER, panelY, panelX + panelWidth - PANEL_CORNER, panelY + 1, PANEL_BORDER)
+        context.fill(panelX + PANEL_CORNER, panelY, panelX + panelWidth - PANEL_CORNER, panelY + 1, border)
         // Draw border - bottom
-        context.fill(panelX + PANEL_CORNER, panelY + panelHeight - 1, panelX + panelWidth - PANEL_CORNER, panelY + panelHeight, PANEL_BORDER)
+        context.fill(panelX + PANEL_CORNER, panelY + panelHeight - 1, panelX + panelWidth - PANEL_CORNER, panelY + panelHeight, border)
         // Draw border - left
-        context.fill(panelX, panelY + PANEL_CORNER, panelX + 1, panelY + panelHeight - PANEL_CORNER, PANEL_BORDER)
+        context.fill(panelX, panelY + PANEL_CORNER, panelX + 1, panelY + panelHeight - PANEL_CORNER, border)
         // Draw border - right
-        context.fill(panelX + panelWidth - 1, panelY + PANEL_CORNER, panelX + panelWidth, panelY + panelHeight - PANEL_CORNER, PANEL_BORDER)
+        context.fill(panelX + panelWidth - 1, panelY + PANEL_CORNER, panelX + panelWidth, panelY + panelHeight - PANEL_CORNER, border)
 
         // Draw rounded corner borders (curved edges)
         // Top-left
-        context.fill(panelX + 2, panelY, panelX + PANEL_CORNER, panelY + 1, PANEL_BORDER)
-        context.fill(panelX + 1, panelY + 1, panelX + 2, panelY + 2, PANEL_BORDER)
-        context.fill(panelX, panelY + 2, panelX + 1, panelY + PANEL_CORNER, PANEL_BORDER)
+        context.fill(panelX + 2, panelY, panelX + PANEL_CORNER, panelY + 1, border)
+        context.fill(panelX + 1, panelY + 1, panelX + 2, panelY + 2, border)
+        context.fill(panelX, panelY + 2, panelX + 1, panelY + PANEL_CORNER, border)
         // Top-right
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY, panelX + panelWidth - 2, panelY + 1, PANEL_BORDER)
-        context.fill(panelX + panelWidth - 2, panelY + 1, panelX + panelWidth - 1, panelY + 2, PANEL_BORDER)
-        context.fill(panelX + panelWidth - 1, panelY + 2, panelX + panelWidth, panelY + PANEL_CORNER, PANEL_BORDER)
+        context.fill(panelX + panelWidth - PANEL_CORNER, panelY, panelX + panelWidth - 2, panelY + 1, border)
+        context.fill(panelX + panelWidth - 2, panelY + 1, panelX + panelWidth - 1, panelY + 2, border)
+        context.fill(panelX + panelWidth - 1, panelY + 2, panelX + panelWidth, panelY + PANEL_CORNER, border)
         // Bottom-left
-        context.fill(panelX + 2, panelY + panelHeight - 1, panelX + PANEL_CORNER, panelY + panelHeight, PANEL_BORDER)
-        context.fill(panelX + 1, panelY + panelHeight - 2, panelX + 2, panelY + panelHeight - 1, PANEL_BORDER)
-        context.fill(panelX, panelY + panelHeight - PANEL_CORNER, panelX + 1, panelY + panelHeight - 2, PANEL_BORDER)
+        context.fill(panelX + 2, panelY + panelHeight - 1, panelX + PANEL_CORNER, panelY + panelHeight, border)
+        context.fill(panelX + 1, panelY + panelHeight - 2, panelX + 2, panelY + panelHeight - 1, border)
+        context.fill(panelX, panelY + panelHeight - PANEL_CORNER, panelX + 1, panelY + panelHeight - 2, border)
         // Bottom-right
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + panelHeight - 1, panelX + panelWidth - 2, panelY + panelHeight, PANEL_BORDER)
-        context.fill(panelX + panelWidth - 2, panelY + panelHeight - 2, panelX + panelWidth - 1, panelY + panelHeight - 1, PANEL_BORDER)
-        context.fill(panelX + panelWidth - 1, panelY + panelHeight - PANEL_CORNER, panelX + panelWidth, panelY + panelHeight - 2, PANEL_BORDER)
+        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + panelHeight - 1, panelX + panelWidth - 2, panelY + panelHeight, border)
+        context.fill(panelX + panelWidth - 2, panelY + panelHeight - 2, panelX + panelWidth - 1, panelY + panelHeight - 1, border)
+        context.fill(panelX + panelWidth - 1, panelY + panelHeight - PANEL_CORNER, panelX + panelWidth, panelY + panelHeight - 2, border)
     }
 
     /**
@@ -937,6 +960,9 @@ object TeamIndicatorUI {
         val panelX = x - PANEL_PADDING_H
         val panelY = y - PANEL_PADDING_V
 
+        // Apply opacity for minimized state
+        val border = applyOpacity(PANEL_BORDER)
+
         val matrices = context.matrices
         matrices.push()
         // Push z-level forward to render on top of 3D models
@@ -944,21 +970,21 @@ object TeamIndicatorUI {
 
         // Redraw rounded corner borders to overlay any model bleed
         // Top-left
-        context.fill(panelX + 2, panelY, panelX + PANEL_CORNER, panelY + 1, PANEL_BORDER)
-        context.fill(panelX + 1, panelY + 1, panelX + 2, panelY + 2, PANEL_BORDER)
-        context.fill(panelX, panelY + 2, panelX + 1, panelY + PANEL_CORNER, PANEL_BORDER)
+        context.fill(panelX + 2, panelY, panelX + PANEL_CORNER, panelY + 1, border)
+        context.fill(panelX + 1, panelY + 1, panelX + 2, panelY + 2, border)
+        context.fill(panelX, panelY + 2, panelX + 1, panelY + PANEL_CORNER, border)
         // Top-right
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY, panelX + panelWidth - 2, panelY + 1, PANEL_BORDER)
-        context.fill(panelX + panelWidth - 2, panelY + 1, panelX + panelWidth - 1, panelY + 2, PANEL_BORDER)
-        context.fill(panelX + panelWidth - 1, panelY + 2, panelX + panelWidth, panelY + PANEL_CORNER, PANEL_BORDER)
+        context.fill(panelX + panelWidth - PANEL_CORNER, panelY, panelX + panelWidth - 2, panelY + 1, border)
+        context.fill(panelX + panelWidth - 2, panelY + 1, panelX + panelWidth - 1, panelY + 2, border)
+        context.fill(panelX + panelWidth - 1, panelY + 2, panelX + panelWidth, panelY + PANEL_CORNER, border)
         // Bottom-left
-        context.fill(panelX + 2, panelY + panelHeight - 1, panelX + PANEL_CORNER, panelY + panelHeight, PANEL_BORDER)
-        context.fill(panelX + 1, panelY + panelHeight - 2, panelX + 2, panelY + panelHeight - 1, PANEL_BORDER)
-        context.fill(panelX, panelY + panelHeight - PANEL_CORNER, panelX + 1, panelY + panelHeight - 2, PANEL_BORDER)
+        context.fill(panelX + 2, panelY + panelHeight - 1, panelX + PANEL_CORNER, panelY + panelHeight, border)
+        context.fill(panelX + 1, panelY + panelHeight - 2, panelX + 2, panelY + panelHeight - 1, border)
+        context.fill(panelX, panelY + panelHeight - PANEL_CORNER, panelX + 1, panelY + panelHeight - 2, border)
         // Bottom-right
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + panelHeight - 1, panelX + panelWidth - 2, panelY + panelHeight, PANEL_BORDER)
-        context.fill(panelX + panelWidth - 2, panelY + panelHeight - 2, panelX + panelWidth - 1, panelY + panelHeight - 1, PANEL_BORDER)
-        context.fill(panelX + panelWidth - 1, panelY + panelHeight - PANEL_CORNER, panelX + panelWidth, panelY + panelHeight - 2, PANEL_BORDER)
+        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + panelHeight - 1, panelX + panelWidth - 2, panelY + panelHeight, border)
+        context.fill(panelX + panelWidth - 2, panelY + panelHeight - 2, panelX + panelWidth - 1, panelY + panelHeight - 1, border)
+        context.fill(panelX + panelWidth - 1, panelY + panelHeight - PANEL_CORNER, panelX + panelWidth, panelY + panelHeight - 2, border)
 
         matrices.pop()
     }
@@ -1079,24 +1105,30 @@ object TeamIndicatorUI {
         val centerSize = 4
         val centerOffset = (BALL_SIZE - centerSize) / 2
 
+        // Apply opacity for minimized state
+        val top = applyOpacity(topColor)
+        val bottom = applyOpacity(bottomColor)
+        val band = applyOpacity(bandColor)
+        val center = applyOpacity(centerColor)
+
         // Top half (status/normal color)
-        context.fill(x + 1, y, x + BALL_SIZE - 1, y + halfSize, topColor)
-        context.fill(x, y + 1, x + BALL_SIZE, y + halfSize, topColor)
+        context.fill(x + 1, y, x + BALL_SIZE - 1, y + halfSize, top)
+        context.fill(x, y + 1, x + BALL_SIZE, y + halfSize, top)
 
         // Bottom half (white/gray)
-        context.fill(x + 1, y + halfSize, x + BALL_SIZE - 1, y + BALL_SIZE, bottomColor)
-        context.fill(x, y + halfSize, x + BALL_SIZE, y + BALL_SIZE - 1, bottomColor)
+        context.fill(x + 1, y + halfSize, x + BALL_SIZE - 1, y + BALL_SIZE, bottom)
+        context.fill(x, y + halfSize, x + BALL_SIZE, y + BALL_SIZE - 1, bottom)
 
         // Center band
-        context.fill(x, y + halfSize - 1, x + BALL_SIZE, y + halfSize + 1, bandColor)
+        context.fill(x, y + halfSize - 1, x + BALL_SIZE, y + halfSize + 1, band)
 
         // Center button
-        context.fill(x + centerOffset, y + centerOffset, x + centerOffset + centerSize, y + centerOffset + centerSize, centerColor)
+        context.fill(x + centerOffset, y + centerOffset, x + centerOffset + centerSize, y + centerOffset + centerSize, center)
         // Button outline
-        context.fill(x + centerOffset, y + centerOffset, x + centerOffset + centerSize, y + centerOffset + 1, bandColor)
-        context.fill(x + centerOffset, y + centerOffset + centerSize - 1, x + centerOffset + centerSize, y + centerOffset + centerSize, bandColor)
-        context.fill(x + centerOffset, y + centerOffset, x + centerOffset + 1, y + centerOffset + centerSize, bandColor)
-        context.fill(x + centerOffset + centerSize - 1, y + centerOffset, x + centerOffset + centerSize, y + centerOffset + centerSize, bandColor)
+        context.fill(x + centerOffset, y + centerOffset, x + centerOffset + centerSize, y + centerOffset + 1, band)
+        context.fill(x + centerOffset, y + centerOffset + centerSize - 1, x + centerOffset + centerSize, y + centerOffset + centerSize, band)
+        context.fill(x + centerOffset, y + centerOffset, x + centerOffset + 1, y + centerOffset + centerSize, band)
+        context.fill(x + centerOffset + centerSize - 1, y + centerOffset, x + centerOffset + centerSize, y + centerOffset + centerSize, band)
     }
 
     private data class Quad<T>(val first: T, val second: T, val third: T, val fourth: T)
@@ -1565,7 +1597,7 @@ object TeamIndicatorUI {
                 text = Text.literal(text),
                 x = (tooltipX + TOOLTIP_PADDING).toFloat(),
                 y = lineY.toFloat(),
-                colour = textColor,
+                colour = applyOpacity(textColor),
                 scale = fontScale,
                 shadow = false
             )
@@ -1579,47 +1611,51 @@ object TeamIndicatorUI {
     private fun drawTooltipBackground(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
         val corner = TOOLTIP_CORNER
 
+        // Apply opacity for minimized state
+        val bg = applyOpacity(TOOLTIP_BG)
+        val border = applyOpacity(TOOLTIP_BORDER)
+
         // Draw main background (cross pattern for rounded corners)
-        context.fill(x + corner, y, x + width - corner, y + height, TOOLTIP_BG)
-        context.fill(x, y + corner, x + width, y + height - corner, TOOLTIP_BG)
+        context.fill(x + corner, y, x + width - corner, y + height, bg)
+        context.fill(x, y + corner, x + width, y + height - corner, bg)
 
         // Fill corners with graduated rounding
         // Top-left corner
-        context.fill(x + 2, y + 1, x + corner, y + 2, TOOLTIP_BG)
-        context.fill(x + 1, y + 2, x + corner, y + corner, TOOLTIP_BG)
+        context.fill(x + 2, y + 1, x + corner, y + 2, bg)
+        context.fill(x + 1, y + 2, x + corner, y + corner, bg)
         // Top-right corner
-        context.fill(x + width - corner, y + 1, x + width - 2, y + 2, TOOLTIP_BG)
-        context.fill(x + width - corner, y + 2, x + width - 1, y + corner, TOOLTIP_BG)
+        context.fill(x + width - corner, y + 1, x + width - 2, y + 2, bg)
+        context.fill(x + width - corner, y + 2, x + width - 1, y + corner, bg)
         // Bottom-left corner
-        context.fill(x + 2, y + height - 2, x + corner, y + height - 1, TOOLTIP_BG)
-        context.fill(x + 1, y + height - corner, x + corner, y + height - 2, TOOLTIP_BG)
+        context.fill(x + 2, y + height - 2, x + corner, y + height - 1, bg)
+        context.fill(x + 1, y + height - corner, x + corner, y + height - 2, bg)
         // Bottom-right corner
-        context.fill(x + width - corner, y + height - 2, x + width - 2, y + height - 1, TOOLTIP_BG)
-        context.fill(x + width - corner, y + height - corner, x + width - 1, y + height - 2, TOOLTIP_BG)
+        context.fill(x + width - corner, y + height - 2, x + width - 2, y + height - 1, bg)
+        context.fill(x + width - corner, y + height - corner, x + width - 1, y + height - 2, bg)
 
         // Draw border - straight edges
-        context.fill(x + corner, y, x + width - corner, y + 1, TOOLTIP_BORDER)
-        context.fill(x + corner, y + height - 1, x + width - corner, y + height, TOOLTIP_BORDER)
-        context.fill(x, y + corner, x + 1, y + height - corner, TOOLTIP_BORDER)
-        context.fill(x + width - 1, y + corner, x + width, y + height - corner, TOOLTIP_BORDER)
+        context.fill(x + corner, y, x + width - corner, y + 1, border)
+        context.fill(x + corner, y + height - 1, x + width - corner, y + height, border)
+        context.fill(x, y + corner, x + 1, y + height - corner, border)
+        context.fill(x + width - 1, y + corner, x + width, y + height - corner, border)
 
         // Draw rounded corner borders
         // Top-left
-        context.fill(x + 2, y, x + corner, y + 1, TOOLTIP_BORDER)
-        context.fill(x + 1, y + 1, x + 2, y + 2, TOOLTIP_BORDER)
-        context.fill(x, y + 2, x + 1, y + corner, TOOLTIP_BORDER)
+        context.fill(x + 2, y, x + corner, y + 1, border)
+        context.fill(x + 1, y + 1, x + 2, y + 2, border)
+        context.fill(x, y + 2, x + 1, y + corner, border)
         // Top-right
-        context.fill(x + width - corner, y, x + width - 2, y + 1, TOOLTIP_BORDER)
-        context.fill(x + width - 2, y + 1, x + width - 1, y + 2, TOOLTIP_BORDER)
-        context.fill(x + width - 1, y + 2, x + width, y + corner, TOOLTIP_BORDER)
+        context.fill(x + width - corner, y, x + width - 2, y + 1, border)
+        context.fill(x + width - 2, y + 1, x + width - 1, y + 2, border)
+        context.fill(x + width - 1, y + 2, x + width, y + corner, border)
         // Bottom-left
-        context.fill(x + 2, y + height - 1, x + corner, y + height, TOOLTIP_BORDER)
-        context.fill(x + 1, y + height - 2, x + 2, y + height - 1, TOOLTIP_BORDER)
-        context.fill(x, y + height - corner, x + 1, y + height - 2, TOOLTIP_BORDER)
+        context.fill(x + 2, y + height - 1, x + corner, y + height, border)
+        context.fill(x + 1, y + height - 2, x + 2, y + height - 1, border)
+        context.fill(x, y + height - corner, x + 1, y + height - 2, border)
         // Bottom-right
-        context.fill(x + width - corner, y + height - 1, x + width - 2, y + height, TOOLTIP_BORDER)
-        context.fill(x + width - 2, y + height - 2, x + width - 1, y + height - 1, TOOLTIP_BORDER)
-        context.fill(x + width - 1, y + height - corner, x + width, y + height - 2, TOOLTIP_BORDER)
+        context.fill(x + width - corner, y + height - 1, x + width - 2, y + height, border)
+        context.fill(x + width - 2, y + height - 2, x + width - 1, y + height - 1, border)
+        context.fill(x + width - 1, y + height - corner, x + width, y + height - 2, border)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
