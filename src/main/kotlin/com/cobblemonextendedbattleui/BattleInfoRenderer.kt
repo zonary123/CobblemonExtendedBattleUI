@@ -1,6 +1,7 @@
 package com.cobblemonextendedbattleui
 
 import com.cobblemon.mod.common.client.CobblemonClient
+import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 
 /**
@@ -9,6 +10,9 @@ import net.minecraft.client.gui.DrawContext
 object BattleInfoRenderer {
 
     fun render(context: DrawContext) {
+        // Respect F1 to hide HUD
+        if (MinecraftClient.getInstance().options.hudHidden) return
+
         // Critical: Check for battle changes FIRST when any feature needs state tracking
         // This ensures state is cleared when a new battle starts, regardless of which features are enabled
         if (PanelConfig.needsBattleStateTracking()) {
