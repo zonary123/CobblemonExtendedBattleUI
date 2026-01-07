@@ -2,12 +2,15 @@ package com.cobblemonextendedbattleui
 
 import com.cobblemon.mod.common.api.moves.MoveTemplate
 import com.cobblemon.mod.common.api.moves.categories.DamageCategories
+import com.cobblemon.mod.common.api.types.ElementalType
 import com.cobblemon.mod.common.battles.ai.strongBattleAI.AIUtility
 import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.render.drawScaledText
+import com.cobblemon.mod.common.CobblemonItemComponents
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.util.InputUtil
+import net.minecraft.registry.Registries
 import net.minecraft.text.Text
 import org.lwjgl.glfw.GLFW
 
@@ -41,6 +44,10 @@ object MoveTooltipRenderer {
     // Priority colors
     private val COLOR_PRIORITY_POSITIVE = color(100, 220, 200, 255)
     private val COLOR_PRIORITY_NEGATIVE = color(220, 100, 120, 255)
+
+    // New stat colors
+    private val COLOR_CRIT = color(255, 200, 50, 255)      // Gold for high crit
+    private val COLOR_EFFECT = color(200, 160, 255, 255)   // Purple for effects
 
     // Effectiveness colors
     private val SUPER_EFFECTIVE_4X = color(50, 220, 50, 255)
@@ -200,11 +207,130 @@ object MoveTooltipRenderer {
             categoryName to categoryColor
         ))
 
-        val power = if (template.power > 0) template.power.toInt().toString() else "--"
-        lines.add(listOf("Power: $power" to COLOR_POWER))
+        // Power with STAB, Sheer Force, and held item calculation
+        if (template.power > 0) {
+            val basePower = template.power.toInt()
+            val playerTypes = getPlayerPokemonTypes()
+            val playerAbility = getPlayerPokemonAbility()
+            val hasStab = playerTypes.any { it.name == template.elementalType.name }
+            val hasSheerForce = playerAbility == "sheerforce" &&
+                template.effectChances.isNotEmpty() && template.effectChances[0] > 0
+
+            // Check for held item power boost
+            val itemBoost = getHeldItemPowerBoost(template.elementalType.name)
+
+            // Calculate effective power with modifiers
+            var effectivePower = template.power
+            val modifiers = mutableListOf<String>()
+
+            if (hasStab) {
+                effectivePower *= 1.5
+                modifiers.add("STAB")
+            }
+            if (hasSheerForce) {
+                effectivePower *= 1.3
+                modifiers.add("Sheer Force")
+            }
+            if (itemBoost != null) {
+                effectivePower *= itemBoost.multiplier
+                modifiers.add(itemBoost.displayName)
+            }
+
+            if (modifiers.isNotEmpty()) {
+                val modifierText = modifiers.joinToString(" + ")
+                lines.add(listOf(
+                    "Power: $basePower " to COLOR_POWER,
+                    "($modifierText: ${effectivePower.toInt()})" to SUPER_EFFECTIVE_2X
+                ))
+            } else {
+                lines.add(listOf("Power: $basePower" to COLOR_POWER))
+            }
+        } else {
+            lines.add(listOf("Power: --" to COLOR_POWER))
+        }
 
         val accuracy = if (template.accuracy > 0) "${template.accuracy.toInt()}%" else "--"
         lines.add(listOf("Accuracy: $accuracy" to COLOR_ACCURACY))
+
+        // Critical hit rate display
+        // Gen 6+ crit stages: Stage 0 = 1/24 (4.17%), +1 = 1/8 (12.5%), +2 = 1/2 (50%), +3+ = 100%
+        // critRatio in Showdown: 1 = Stage 0, 2 = Stage +1, 3 = Stage +2, 4+ = Stage +3+
+        // Super Luck adds +1 to crit stage, Scope Lens/Razor Claw add +1 to crit stage
+        if (template.power > 0) {
+            val baseCritRatio = template.critRatio
+            val hasSuperLuck = getPlayerPokemonAbility() == "superluck"
+            val heldItemName = getPlayerPokemonHeldItem()
+            val hasCritItem = heldItemName == "scope_lens" || heldItemName == "razor_claw"
+
+            // Calculate total crit stage bonus
+            var critBonus = 0
+            val boostSources = mutableListOf<String>()
+            if (hasSuperLuck) {
+                critBonus++
+                boostSources.add("Super Luck")
+            }
+            if (hasCritItem) {
+                critBonus++
+                val itemDisplayName = if (heldItemName == "scope_lens") "Scope Lens" else "Razor Claw"
+                boostSources.add(itemDisplayName)
+            }
+
+            val effectiveCritRatio = (baseCritRatio + critBonus).coerceAtMost(4.0)
+            val baseCritPercent = critRatioToPercent(baseCritRatio)
+            val effectiveCritPercent = critRatioToPercent(effectiveCritRatio)
+
+            when {
+                // Has crit boosts on a normal move - show the boost
+                critBonus > 0 && baseCritRatio <= 1.0 -> {
+                    val boostText = boostSources.joinToString(" + ")
+                    lines.add(listOf(
+                        "Crit: $baseCritPercent " to COLOR_CRIT,
+                        "($boostText: $effectiveCritPercent)" to SUPER_EFFECTIVE_2X
+                    ))
+                }
+                // Has crit boosts on a high crit move - show both
+                critBonus > 0 && baseCritRatio > 1.0 -> {
+                    val boostText = boostSources.joinToString(" + ")
+                    lines.add(listOf(
+                        "High Crit: $baseCritPercent " to COLOR_CRIT,
+                        "($boostText: $effectiveCritPercent)" to SUPER_EFFECTIVE_2X
+                    ))
+                }
+                // No boosts, but move has elevated crit
+                baseCritRatio > 1.0 -> {
+                    lines.add(listOf("High Crit: $baseCritPercent" to COLOR_CRIT))
+                }
+                // Normal crit rate without any boosts - don't show (4.17% is standard)
+            }
+        }
+
+        // Effect chance (e.g., 10% for Ember's burn)
+        // Abilities: Serene Grace doubles chance, Sheer Force removes effect for power boost
+        if (template.effectChances.isNotEmpty() && template.effectChances[0] > 0) {
+            val baseEffect = template.effectChances[0]
+            val playerAbility = getPlayerPokemonAbility()
+
+            when (playerAbility) {
+                "sheerforce" -> {
+                    // Sheer Force removes secondary effects for 30% power boost
+                    lines.add(listOf(
+                        "Effect: " to COLOR_EFFECT,
+                        "N/A (Sheer Force)" to TOOLTIP_DIM
+                    ))
+                }
+                "serenegrace" -> {
+                    // Serene Grace doubles secondary effect chance
+                    val doubledEffect = (baseEffect * 2).coerceAtMost(100.0).toInt()
+                    lines.add(listOf(
+                        "Effect: ${baseEffect.toInt()}% " to COLOR_EFFECT,
+                        "(Serene Grace: $doubledEffect%)" to SUPER_EFFECTIVE_2X
+                    ))
+                }
+                else -> {
+                    lines.add(listOf("Effect: ${baseEffect.toInt()}%" to COLOR_EFFECT))
+                }
+            }
+        }
 
         val ppRatio = move.currentPp.toFloat() / move.maxPp.coerceAtLeast(1)
         val ppColor = if (ppRatio <= 0.25f) COLOR_PP_LOW else COLOR_PP
@@ -287,12 +413,15 @@ object MoveTooltipRenderer {
 
     /**
      * Get display text and color for an effectiveness multiplier.
+     * Uses "Extremely Effective/Ineffective" for 4x multipliers like Pokemon Champions.
      */
     private fun getEffectivenessText(multiplier: Double): Pair<String, Int> {
         return when {
             multiplier == 0.0 -> "Immune (0x)" to IMMUNE
+            multiplier <= 0.25 -> "Extremely Ineffective (${formatMultiplier(multiplier)}x)" to NOT_EFFECTIVE
             multiplier < 0.5 -> "Not effective (${formatMultiplier(multiplier)}x)" to NOT_EFFECTIVE
             multiplier < 1.0 -> "Not very effective (${formatMultiplier(multiplier)}x)" to NOT_EFFECTIVE
+            multiplier >= 4.0 -> "Extremely Effective! (${formatMultiplier(multiplier)}x)" to SUPER_EFFECTIVE_4X
             multiplier > 2.0 -> "Super effective! (${formatMultiplier(multiplier)}x)" to SUPER_EFFECTIVE_4X
             multiplier > 1.0 -> "Super effective! (${formatMultiplier(multiplier)}x)" to SUPER_EFFECTIVE_2X
             else -> "Normal damage (1x)" to NEUTRAL
@@ -308,6 +437,118 @@ object MoveTooltipRenderer {
         } else {
             String.format("%.2g", multiplier)
         }
+    }
+
+    /**
+     * Convert Showdown critRatio to percentage string.
+     * Gen 6+ mechanics:
+     *   critRatio 1 (Stage 0)  = 1/24 ≈ 4.17%
+     *   critRatio 2 (Stage +1) = 1/8  = 12.5%
+     *   critRatio 3 (Stage +2) = 1/2  = 50%
+     *   critRatio 4+ (Stage +3+) = 100%
+     */
+    private fun critRatioToPercent(critRatio: Double): String {
+        return when {
+            critRatio >= 4.0 -> "100%"
+            critRatio >= 3.0 -> "50%"
+            critRatio >= 2.0 -> "12.5%"
+            else -> "4.17%"
+        }
+    }
+
+    /**
+     * Get the types of the player's active Pokemon for STAB calculation.
+     */
+    private fun getPlayerPokemonTypes(): List<ElementalType> {
+        val battle = CobblemonClient.battle ?: return emptyList()
+        val playerUUID = MinecraftClient.getInstance().player?.uuid ?: return emptyList()
+        val playerSide = if (battle.side1.actors.any { it.uuid == playerUUID }) battle.side1 else battle.side2
+        val playerPokemon = playerSide.activeClientBattlePokemon.firstOrNull()?.battlePokemon ?: return emptyList()
+        val species = playerPokemon.species ?: return emptyList()
+        return listOfNotNull(species.primaryType, species.secondaryType)
+    }
+
+    /**
+     * Get the ability name of the player's active Pokemon.
+     * Used for effect chance modifiers (Serene Grace, Sheer Force).
+     *
+     * Note: Battle packets don't include ability data, so we look up the Pokemon
+     * in the player's party by UUID to get the full ability information.
+     */
+    private fun getPlayerPokemonAbility(): String? {
+        val partyPokemon = getPlayerPartyPokemon() ?: return null
+        return partyPokemon.ability.name
+    }
+
+    /**
+     * Get the held item name of the player's active Pokemon.
+     * Returns the Showdown ID for the item (e.g., "charcoal", "lifeorb").
+     * Returns null if the item is empty or has been consumed (e.g., gems after use).
+     */
+    private fun getPlayerPokemonHeldItem(): String? {
+        val battle = CobblemonClient.battle ?: return null
+        val playerUUID = MinecraftClient.getInstance().player?.uuid ?: return null
+        val playerSide = if (battle.side1.actors.any { it.uuid == playerUUID }) battle.side1 else battle.side2
+        val battlePokemon = playerSide.activeClientBattlePokemon.firstOrNull()?.battlePokemon ?: return null
+
+        // Check BattleStateTracker first - this tracks item consumption via battle messages
+        // and is more reliable than party storage during battle
+        val trackedItem = BattleStateTracker.getItem(battlePokemon.uuid)
+        if (trackedItem != null) {
+            // If item was consumed, knocked off, or stolen, return null
+            if (trackedItem.status != BattleStateTracker.ItemStatus.HELD) {
+                return null
+            }
+        }
+
+        // Get item from party storage
+        val partyPokemon = CobblemonClient.storage.party.findByUUID(battlePokemon.uuid) ?: return null
+        val heldItem = partyPokemon.heldItem()
+        if (heldItem.isEmpty) return null
+
+        // First try to get the Showdown ID from the HELD_ITEM_EFFECT component
+        // This handles remapped items like charcoal_stick -> charcoal
+        val heldItemEffect = heldItem.get(CobblemonItemComponents.HELD_ITEM_EFFECT)
+        if (heldItemEffect != null) {
+            // Check if the item has been consumed (e.g., gems after use)
+            if (heldItemEffect.consumed) {
+                return null
+            }
+            return heldItemEffect.showdownId
+        }
+
+        // Fallback: get from registry path and remove underscores (Showdown format)
+        val registryPath = Registries.ITEM.getId(heldItem.item).path
+        return registryPath.replace("_", "")
+    }
+
+    /**
+     * Get power boost from held item if applicable to the move type.
+     * @param moveType The type of the move being used
+     * @return The item boost info if applicable, null otherwise
+     */
+    private fun getHeldItemPowerBoost(moveType: String): ItemPowerBoostParser.ItemPowerBoost? {
+        val heldItemName = getPlayerPokemonHeldItem() ?: return null
+        val boost = ItemPowerBoostParser.getBoostForItem(heldItemName) ?: return null
+
+        // Check if boost applies to this move type
+        return when {
+            boost.boostedType == null -> boost  // Life Orb - applies to all damaging moves
+            boost.boostedType.equals(moveType, ignoreCase = true) -> boost
+            else -> null
+        }
+    }
+
+    /**
+     * Get the player's active Pokemon from the party storage.
+     * Battle packets don't include full Pokemon data, so we look up by UUID.
+     */
+    private fun getPlayerPartyPokemon(): com.cobblemon.mod.common.pokemon.Pokemon? {
+        val battle = CobblemonClient.battle ?: return null
+        val playerUUID = MinecraftClient.getInstance().player?.uuid ?: return null
+        val playerSide = if (battle.side1.actors.any { it.uuid == playerUUID }) battle.side1 else battle.side2
+        val battlePokemon = playerSide.activeClientBattlePokemon.firstOrNull()?.battlePokemon ?: return null
+        return CobblemonClient.storage.party.findByUUID(battlePokemon.uuid)
     }
 
     /**
