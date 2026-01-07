@@ -6,6 +6,8 @@ import com.cobblemon.mod.common.api.pokemon.stats.Stats
 import com.cobblemon.mod.common.api.pokemon.status.Statuses
 import com.cobblemon.mod.common.api.pokemon.status.Status
 import com.cobblemon.mod.common.api.types.ElementalType
+import com.cobblemon.mod.common.api.types.ElementalTypes
+import com.cobblemon.mod.common.api.types.tera.TeraType
 import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.battle.ClientBattlePokemon
 import com.cobblemon.mod.common.client.battle.ClientBattleSide
@@ -193,7 +195,8 @@ object TeamIndicatorUI {
         val abilityName: String? = null,  // Known ability (player Pokemon or revealed)
         val possibleAbilities: List<String>? = null,  // Possible abilities if not yet revealed (opponent)
         val primaryType: ElementalType? = null,
-        val secondaryType: ElementalType? = null
+        val secondaryType: ElementalType? = null,
+        val teraType : TeraType? = null
     )
 
     // Currently rendered pokeball bounds (refreshed each frame)
@@ -1470,7 +1473,7 @@ object TeamIndicatorUI {
             ?: getPokemonNameFromUuid(uuid)
             ?: trackedPokemon?.displayName
             ?: "Unknown"
-        
+
 
         val hpPercent = trackedPokemon?.hpPercent
             ?: battlePokemon?.let {
@@ -1583,6 +1586,7 @@ object TeamIndicatorUI {
         val species = speciesName?.let { PokemonSpecies.getByName(it.lowercase()) }
         val primaryType = battlePokemon?.form?.primaryType
         val secondaryType = battlePokemon?.form?.secondaryType
+        val teraType = battlePokemon?.teraType
 
         return TooltipData(
             pokemonName = name,
@@ -1600,7 +1604,8 @@ object TeamIndicatorUI {
             abilityName = abilityName,
             possibleAbilities = possibleAbilities,
             primaryType = primaryType,
-            secondaryType = secondaryType
+            secondaryType = secondaryType,
+            teraType = teraType
         )
     }
 
@@ -1631,6 +1636,18 @@ object TeamIndicatorUI {
             lines.add(typeSegments)
         }
 
+        // Tera Type
+        if (data.teraType != null){
+            val typeSegments = mutableListOf<Pair<String, Int>>()
+            typeSegments.add("Tera Type: " to TOOLTIP_LABEL)
+            val elementalType = ElementalTypes.get(data.teraType.showdownId());
+            if (elementalType != null) {
+                typeSegments.add(elementalType.displayName.string to UIUtils.getTypeColor(elementalType))
+            } else {
+                typeSegments.add(data.teraType.name to TOOLTIP_TEXT)
+            }
+            lines.add(typeSegments);
+        }
         // Ability
         if (data.abilityName != null) {
             // Known ability (player Pokemon or revealed opponent ability)
