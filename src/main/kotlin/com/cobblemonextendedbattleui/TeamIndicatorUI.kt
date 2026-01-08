@@ -200,7 +200,8 @@ object TeamIndicatorUI {
         val possibleAbilities: List<String>? = null,  // Possible abilities if not yet revealed (opponent)
         val primaryType: ElementalType? = null,
         val secondaryType: ElementalType? = null,
-        val teraType: TeraType? = null
+        val teraType: TeraType? = null,
+        val form: FormData ? = null
     )
 
     // Currently rendered pokeball bounds (refreshed each frame)
@@ -540,10 +541,13 @@ object TeamIndicatorUI {
         level: Int,
         speedStage: Int,
         status: Status?,
-        knownItem: BattleStateTracker.TrackedItem?
+        knownItem: BattleStateTracker.TrackedItem?,
+        form: FormData?
     ): SpeedRangeResult? {
         val species = PokemonSpecies.getByName(speciesName) ?: return null
-        val baseSpeed = species.baseStats[Stats.SPEED] ?: return null
+        val baseSpeed = if (form != null) form.baseStats[Stats.SPEED] ?: return null
+        else species.baseStats[Stats.SPEED] ?: return null
+
         val weather = BattleStateTracker.weather?.type
         val terrain = BattleStateTracker.terrain?.type
         val hasStatus = status != null
@@ -1783,7 +1787,8 @@ object TeamIndicatorUI {
             possibleAbilities = possibleAbilities,
             primaryType = primaryType,
             secondaryType = secondaryType,
-            teraType = teraType
+            teraType = teraType,
+            form = trackedPokemon?.form
         )
     }
 
@@ -1954,7 +1959,7 @@ object TeamIndicatorUI {
         } else if (data.speciesName != null && data.level != null) {
             // Opponent: show min-max speed range with ability considerations
             val speedRange = calculateOpponentSpeedRange(
-                data.speciesName, data.level, speedStage, data.statusCondition, data.item
+                data.speciesName, data.level, speedStage, data.statusCondition, data.item, data.form
             )
             if (speedRange != null) {
                 val modifiers = mutableListOf<String>()
