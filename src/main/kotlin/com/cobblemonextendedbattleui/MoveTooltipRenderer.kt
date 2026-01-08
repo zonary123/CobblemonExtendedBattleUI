@@ -219,6 +219,7 @@ object MoveTooltipRenderer {
             // Check for held item power boost
             val itemBoost = getHeldItemPowerBoost(template.elementalType.name)
 
+
             // Calculate effective power with modifiers
             var effectivePower = template.power
             val modifiers = mutableListOf<String>()
@@ -526,8 +527,8 @@ object MoveTooltipRenderer {
      */
     private fun getHeldItemPowerBoost(moveType: String): ItemPowerBoostParser.ItemPowerBoost? {
         val heldItemName = getPlayerPokemonHeldItem(false) ?: return null
+        //CobblemonExtendedBattleUI.LOGGER.info("Held Item Name: $heldItemName")
         val boost = ItemPowerBoostParser.getBoostForItem(heldItemName) ?: return null
-
         // Check if boost applies to this move type
         return when {
             boost.boostedType == null -> boost  // Life Orb - applies to all damaging moves
