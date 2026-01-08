@@ -3,11 +3,12 @@ package com.cobblemonextendedbattleui
 import com.cobblemon.mod.common.api.moves.Moves
 import com.cobblemon.mod.common.api.pokemon.PokemonSpecies
 import com.cobblemon.mod.common.api.pokemon.stats.Stats
-import com.cobblemon.mod.common.api.pokemon.status.Statuses
 import com.cobblemon.mod.common.api.pokemon.status.Status
+import com.cobblemon.mod.common.api.pokemon.status.Statuses
 import com.cobblemon.mod.common.api.types.ElementalType
 import com.cobblemon.mod.common.api.types.ElementalTypes
 import com.cobblemon.mod.common.api.types.tera.TeraType
+import com.cobblemon.mod.common.api.types.tera.TeraTypes
 import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.battle.ClientBattlePokemon
 import com.cobblemon.mod.common.client.battle.ClientBattleSide
@@ -15,6 +16,7 @@ import com.cobblemon.mod.common.client.gui.drawProfilePokemon
 import com.cobblemon.mod.common.client.render.drawScaledText
 import com.cobblemon.mod.common.client.render.models.blockbench.FloatingState
 import com.cobblemon.mod.common.entity.PoseType
+import com.cobblemon.mod.common.pokemon.FormData
 import com.cobblemon.mod.common.pokemon.Pokemon
 import com.cobblemon.mod.common.pokemon.RenderablePokemon
 import net.minecraft.client.MinecraftClient
@@ -24,7 +26,7 @@ import net.minecraft.text.Text
 import net.minecraft.util.Identifier
 import org.joml.Quaternionf
 import org.lwjgl.glfw.GLFW
-import java.util.UUID
+import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -119,7 +121,9 @@ object TeamIndicatorUI {
         // Original form tracking for Transform/Impostor (Ditto)
         var originalSpeciesIdentifier: Identifier? = null,
         var originalAspects: Set<String> = emptySet(),
-        var isTransformed: Boolean = false
+        var isTransformed: Boolean = false,
+        var form: FormData? = null,
+        var teraType: TeraType? = null
     )
 
     // Track Pokemon for both sides separately (for spectating and opponent tracking)
@@ -196,7 +200,7 @@ object TeamIndicatorUI {
         val possibleAbilities: List<String>? = null,  // Possible abilities if not yet revealed (opponent)
         val primaryType: ElementalType? = null,
         val secondaryType: ElementalType? = null,
-        val teraType : TeraType? = null
+        val teraType: TeraType? = null
     )
 
     // Currently rendered pokeball bounds (refreshed each frame)
@@ -207,6 +211,7 @@ object TeamIndicatorUI {
 
     // Currently rendered tooltip bounds (for input handling)
     private var tooltipBounds: TooltipBoundsData? = null
+
     private data class TooltipBoundsData(val x: Int, val y: Int, val width: Int, val height: Int)
 
     // Team panel bounds (for input handling - covers all pokeball indicators)
@@ -555,7 +560,8 @@ object TeamIndicatorUI {
         val minSpeed = (minBaseStat * stageMultiplier * statusMultiplier).toInt()
 
         // For max speed: check if any ability could boost speed
-        val maxAbilityMultiplier = getMaxPossibleAbilitySpeedMultiplier(speciesName, weather, terrain, hasStatus, itemConsumed)
+        val maxAbilityMultiplier =
+            getMaxPossibleAbilitySpeedMultiplier(speciesName, weather, terrain, hasStatus, itemConsumed)
 
         // For paralysis: Quick Feet could negate the penalty AND give 1.5x
         val maxStatusMultiplier = if (status == Statuses.PARALYSIS) {
@@ -566,7 +572,8 @@ object TeamIndicatorUI {
             1.0
         }
 
-        val maxSpeed = (maxBaseStat * stageMultiplier * maxAbilityMultiplier.coerceAtLeast(1.0) * maxStatusMultiplier).toInt()
+        val maxSpeed =
+            (maxBaseStat * stageMultiplier * maxAbilityMultiplier.coerceAtLeast(1.0) * maxStatusMultiplier).toInt()
 
         // Generate ability note if conditions apply
         val abilityNote = when {
@@ -590,6 +597,7 @@ object TeamIndicatorUI {
                 }
                 if (activeConditions.isNotEmpty()) activeConditions.joinToString("/") + "?" else null
             }
+
             else -> null
         }
 
@@ -804,20 +812,32 @@ object TeamIndicatorUI {
             // Player is on right - use battle actor's pokemon list for authoritative data
             val playerTeam = playerActor!!.pokemon
             val rightWidth = playerTeam.size * (MODEL_SIZE + MODEL_SPACING) - MODEL_SPACING
-            renderBattleTeam(context, screenWidth - HORIZONTAL_INSET - rightWidth, rightY, playerTeam, isLeftSide = false)
+            renderBattleTeam(
+                context,
+                screenWidth - HORIZONTAL_INSET - rightWidth,
+                rightY,
+                playerTeam,
+                isLeftSide = false
+            )
         } else {
             // Right side is opponent or we're spectating - use tracked Pokemon from battle data
             val rightTeam = trackedSide2Pokemon.values.toList()
             if (rightTeam.isNotEmpty()) {
                 val rightWidth = rightTeam.size * (MODEL_SIZE + MODEL_SPACING) - MODEL_SPACING
-                renderTrackedTeam(context, screenWidth - HORIZONTAL_INSET - rightWidth, rightY, rightTeam, isLeftSide = false)
+                renderTrackedTeam(
+                    context,
+                    screenWidth - HORIZONTAL_INSET - rightWidth,
+                    rightY,
+                    rightTeam,
+                    isLeftSide = false
+                )
             }
         }
 
         // Detect hovered pokeball
         hoveredPokeball = pokeballBounds.find { bounds ->
             mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
-            mouseY >= bounds.y && mouseY <= bounds.y + bounds.height
+                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height
         }
 
         // Handle input when hovering over team panels (even if tooltip not visible)
@@ -834,13 +854,15 @@ object TeamIndicatorUI {
 
         leftTeamPanelBounds?.let { bounds ->
             if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
-                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height) {
+                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height
+            ) {
                 return true
             }
         }
         rightTeamPanelBounds?.let { bounds ->
             if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
-                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height) {
+                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height
+            ) {
                 return true
             }
         }
@@ -870,7 +892,11 @@ object TeamIndicatorUI {
      * Also detects Pokemon that disappeared from activePokemon without a switch message,
      * indicating they were KO'd (e.g., by Perish Song, Memento, Explosion).
      */
-    private fun updateTrackedPokemonForSide(side: ClientBattleSide, tracked: ConcurrentHashMap<UUID, TrackedPokemon>, isLeftSide: Boolean) {
+    private fun updateTrackedPokemonForSide(
+        side: ClientBattleSide,
+        tracked: ConcurrentHashMap<UUID, TrackedPokemon>,
+        isLeftSide: Boolean
+    ) {
         val currentlyActiveUuids = mutableSetOf<UUID>()
 
         for (actor in side.actors) {
@@ -946,7 +972,10 @@ object TeamIndicatorUI {
      * Also adds to knockedOutPokemon set when HP reaches 0 for reliable KO tracking.
      * Processes pending transforms for Impostor ability (transform before tracking).
      */
-    private fun updateTrackedPokemonInMap(battlePokemon: ClientBattlePokemon, targetMap: ConcurrentHashMap<UUID, TrackedPokemon>) {
+    private fun updateTrackedPokemonInMap(
+        battlePokemon: ClientBattlePokemon,
+        targetMap: ConcurrentHashMap<UUID, TrackedPokemon>
+    ) {
         val uuid = battlePokemon.uuid
         // For opponent Pokemon, hpValue is already a 0.0-1.0 percentage (isHpFlat = false)
         // For player Pokemon, hpValue is absolute and needs to be divided by maxHp (isHpFlat = true)
@@ -964,6 +993,8 @@ object TeamIndicatorUI {
         val speciesId = speciesName?.let { Identifier.of("cobblemon", it) }
         val aspects = battlePokemon.state.currentAspects
         val displayName = battlePokemon.displayName.string
+        val form = battlePokemon.species.getForm(aspects)
+        val teraType = battlePokemon.properties.teraType?.let { TeraTypes.get(it) };
 
         // If HP is 0, add to persistent KO tracking
         // This catches KO status even if faint message hasn't arrived yet
@@ -1011,7 +1042,9 @@ object TeamIndicatorUI {
                     aspects = aspects,
                     originalSpeciesIdentifier = originalSpecies,
                     originalAspects = originalAspects,
-                    isTransformed = isTransformed
+                    isTransformed = isTransformed,
+                    form = form,
+                    teraType = teraType
                 )
             }
         }
@@ -1049,19 +1082,49 @@ object TeamIndicatorUI {
         context.fill(panelX + panelWidth - PANEL_CORNER, panelY + 2, panelX + panelWidth - 1, panelY + PANEL_CORNER, bg)
         // Bottom-left corner
         context.fill(panelX + 2, panelY + panelHeight - 2, panelX + PANEL_CORNER, panelY + panelHeight - 1, bg)
-        context.fill(panelX + 1, panelY + panelHeight - PANEL_CORNER, panelX + PANEL_CORNER, panelY + panelHeight - 2, bg)
+        context.fill(
+            panelX + 1,
+            panelY + panelHeight - PANEL_CORNER,
+            panelX + PANEL_CORNER,
+            panelY + panelHeight - 2,
+            bg
+        )
         // Bottom-right corner
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + panelHeight - 2, panelX + panelWidth - 2, panelY + panelHeight - 1, bg)
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + panelHeight - PANEL_CORNER, panelX + panelWidth - 1, panelY + panelHeight - 2, bg)
+        context.fill(
+            panelX + panelWidth - PANEL_CORNER,
+            panelY + panelHeight - 2,
+            panelX + panelWidth - 2,
+            panelY + panelHeight - 1,
+            bg
+        )
+        context.fill(
+            panelX + panelWidth - PANEL_CORNER,
+            panelY + panelHeight - PANEL_CORNER,
+            panelX + panelWidth - 1,
+            panelY + panelHeight - 2,
+            bg
+        )
 
         // Draw border - top
         context.fill(panelX + PANEL_CORNER, panelY, panelX + panelWidth - PANEL_CORNER, panelY + 1, border)
         // Draw border - bottom
-        context.fill(panelX + PANEL_CORNER, panelY + panelHeight - 1, panelX + panelWidth - PANEL_CORNER, panelY + panelHeight, border)
+        context.fill(
+            panelX + PANEL_CORNER,
+            panelY + panelHeight - 1,
+            panelX + panelWidth - PANEL_CORNER,
+            panelY + panelHeight,
+            border
+        )
         // Draw border - left
         context.fill(panelX, panelY + PANEL_CORNER, panelX + 1, panelY + panelHeight - PANEL_CORNER, border)
         // Draw border - right
-        context.fill(panelX + panelWidth - 1, panelY + PANEL_CORNER, panelX + panelWidth, panelY + panelHeight - PANEL_CORNER, border)
+        context.fill(
+            panelX + panelWidth - 1,
+            panelY + PANEL_CORNER,
+            panelX + panelWidth,
+            panelY + panelHeight - PANEL_CORNER,
+            border
+        )
 
         // Draw rounded corner borders (curved edges)
         // Top-left
@@ -1077,9 +1140,27 @@ object TeamIndicatorUI {
         context.fill(panelX + 1, panelY + panelHeight - 2, panelX + 2, panelY + panelHeight - 1, border)
         context.fill(panelX, panelY + panelHeight - PANEL_CORNER, panelX + 1, panelY + panelHeight - 2, border)
         // Bottom-right
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + panelHeight - 1, panelX + panelWidth - 2, panelY + panelHeight, border)
-        context.fill(panelX + panelWidth - 2, panelY + panelHeight - 2, panelX + panelWidth - 1, panelY + panelHeight - 1, border)
-        context.fill(panelX + panelWidth - 1, panelY + panelHeight - PANEL_CORNER, panelX + panelWidth, panelY + panelHeight - 2, border)
+        context.fill(
+            panelX + panelWidth - PANEL_CORNER,
+            panelY + panelHeight - 1,
+            panelX + panelWidth - 2,
+            panelY + panelHeight,
+            border
+        )
+        context.fill(
+            panelX + panelWidth - 2,
+            panelY + panelHeight - 2,
+            panelX + panelWidth - 1,
+            panelY + panelHeight - 1,
+            border
+        )
+        context.fill(
+            panelX + panelWidth - 1,
+            panelY + panelHeight - PANEL_CORNER,
+            panelX + panelWidth,
+            panelY + panelHeight - 2,
+            border
+        )
     }
 
     /**
@@ -1117,9 +1198,27 @@ object TeamIndicatorUI {
         context.fill(panelX + 1, panelY + panelHeight - 2, panelX + 2, panelY + panelHeight - 1, border)
         context.fill(panelX, panelY + panelHeight - PANEL_CORNER, panelX + 1, panelY + panelHeight - 2, border)
         // Bottom-right
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + panelHeight - 1, panelX + panelWidth - 2, panelY + panelHeight, border)
-        context.fill(panelX + panelWidth - 2, panelY + panelHeight - 2, panelX + panelWidth - 1, panelY + panelHeight - 1, border)
-        context.fill(panelX + panelWidth - 1, panelY + panelHeight - PANEL_CORNER, panelX + panelWidth, panelY + panelHeight - 2, border)
+        context.fill(
+            panelX + panelWidth - PANEL_CORNER,
+            panelY + panelHeight - 1,
+            panelX + panelWidth - 2,
+            panelY + panelHeight,
+            border
+        )
+        context.fill(
+            panelX + panelWidth - 2,
+            panelY + panelHeight - 2,
+            panelX + panelWidth - 1,
+            panelY + panelHeight - 1,
+            border
+        )
+        context.fill(
+            panelX + panelWidth - 1,
+            panelY + panelHeight - PANEL_CORNER,
+            panelX + panelWidth,
+            panelY + panelHeight - 2,
+            border
+        )
 
         matrices.pop()
     }
@@ -1129,7 +1228,13 @@ object TeamIndicatorUI {
      * This uses authoritative battle data which works correctly on servers.
      * Also checks persistent KO tracking as a fallback for race conditions.
      */
-    private fun renderBattleTeam(context: DrawContext, startX: Int, startY: Int, team: List<Pokemon>, isLeftSide: Boolean) {
+    private fun renderBattleTeam(
+        context: DrawContext,
+        startX: Int,
+        startY: Int,
+        team: List<Pokemon>,
+        isLeftSide: Boolean
+    ) {
         // Draw background panel first
         drawTeamPanel(context, startX, startY, team.size)
 
@@ -1160,7 +1265,17 @@ object TeamIndicatorUI {
             )
 
             // Store bounds for hover detection (this is player's own Pokemon)
-            pokeballBounds.add(PokeballBounds(x, startY, MODEL_SIZE, MODEL_SIZE, pokemon.uuid, isLeftSide, isPlayerPokemon = true))
+            pokeballBounds.add(
+                PokeballBounds(
+                    x,
+                    startY,
+                    MODEL_SIZE,
+                    MODEL_SIZE,
+                    pokemon.uuid,
+                    isLeftSide,
+                    isPlayerPokemon = true
+                )
+            )
 
             x += MODEL_SIZE + MODEL_SPACING
         }
@@ -1174,7 +1289,13 @@ object TeamIndicatorUI {
      * Uses both the tracked Pokemon's isKO field AND the persistent knockedOutPokemon set
      * to handle race conditions where Pokemon is removed from activePokemon before we render.
      */
-    private fun renderTrackedTeam(context: DrawContext, startX: Int, startY: Int, team: List<TrackedPokemon>, isLeftSide: Boolean) {
+    private fun renderTrackedTeam(
+        context: DrawContext,
+        startX: Int,
+        startY: Int,
+        team: List<TrackedPokemon>,
+        isLeftSide: Boolean
+    ) {
         // Draw background panel first
         drawTeamPanel(context, startX, startY, team.size)
 
@@ -1215,7 +1336,17 @@ object TeamIndicatorUI {
             )
 
             // Store bounds for hover detection (opponent or spectated team)
-            pokeballBounds.add(PokeballBounds(x, startY, MODEL_SIZE, MODEL_SIZE, pokemon.uuid, isLeftSide, isPlayerPokemon = false))
+            pokeballBounds.add(
+                PokeballBounds(
+                    x,
+                    startY,
+                    MODEL_SIZE,
+                    MODEL_SIZE,
+                    pokemon.uuid,
+                    isLeftSide,
+                    isPlayerPokemon = false
+                )
+            )
 
             x += MODEL_SIZE + MODEL_SPACING
         }
@@ -1235,7 +1366,15 @@ object TeamIndicatorUI {
         }
     }
 
-    private fun drawPokeball(context: DrawContext, x: Int, y: Int, topColor: Int, bottomColor: Int, bandColor: Int, centerColor: Int) {
+    private fun drawPokeball(
+        context: DrawContext,
+        x: Int,
+        y: Int,
+        topColor: Int,
+        bottomColor: Int,
+        bandColor: Int,
+        centerColor: Int
+    ) {
         val halfSize = BALL_SIZE / 2
         val centerSize = 4
         val centerOffset = (BALL_SIZE - centerSize) / 2
@@ -1258,12 +1397,30 @@ object TeamIndicatorUI {
         context.fill(x, y + halfSize - 1, x + BALL_SIZE, y + halfSize + 1, band)
 
         // Center button
-        context.fill(x + centerOffset, y + centerOffset, x + centerOffset + centerSize, y + centerOffset + centerSize, center)
+        context.fill(
+            x + centerOffset,
+            y + centerOffset,
+            x + centerOffset + centerSize,
+            y + centerOffset + centerSize,
+            center
+        )
         // Button outline
         context.fill(x + centerOffset, y + centerOffset, x + centerOffset + centerSize, y + centerOffset + 1, band)
-        context.fill(x + centerOffset, y + centerOffset + centerSize - 1, x + centerOffset + centerSize, y + centerOffset + centerSize, band)
+        context.fill(
+            x + centerOffset,
+            y + centerOffset + centerSize - 1,
+            x + centerOffset + centerSize,
+            y + centerOffset + centerSize,
+            band
+        )
         context.fill(x + centerOffset, y + centerOffset, x + centerOffset + 1, y + centerOffset + centerSize, band)
-        context.fill(x + centerOffset + centerSize - 1, y + centerOffset, x + centerOffset + centerSize, y + centerOffset + centerSize, band)
+        context.fill(
+            x + centerOffset + centerSize - 1,
+            y + centerOffset,
+            x + centerOffset + centerSize,
+            y + centerOffset + centerSize,
+            band
+        )
     }
 
     private data class Quad<T>(val first: T, val second: T, val third: T, val fourth: T)
@@ -1397,6 +1554,7 @@ object TeamIndicatorUI {
                 val statusColor = getStatusColor(status)
                 Quad(statusColor, COLOR_NORMAL_BOTTOM, COLOR_NORMAL_BAND, COLOR_NORMAL_CENTER)
             }
+
             else -> Quad(COLOR_NORMAL_TOP, COLOR_NORMAL_BOTTOM, COLOR_NORMAL_BAND, COLOR_NORMAL_CENTER)
         }
 
@@ -1425,7 +1583,10 @@ object TeamIndicatorUI {
         renderTooltip(context, hovered, tooltipData)
     }
 
-    private fun getBattlePokemonByUuid(uuid: UUID, battle: com.cobblemon.mod.common.client.battle.ClientBattle): Pokemon? {
+    private fun getBattlePokemonByUuid(
+        uuid: UUID,
+        battle: com.cobblemon.mod.common.client.battle.ClientBattle
+    ): Pokemon? {
         for (side in listOf(battle.side1, battle.side2)) {
             for (actor in side.actors) {
                 actor.pokemon.find { it.uuid == uuid }?.let { return it }
@@ -1468,12 +1629,16 @@ object TeamIndicatorUI {
         return null
     }
 
-    private fun getTooltipData(uuid: UUID, trackedPokemon: TrackedPokemon?, battlePokemon: Pokemon?, isPlayerPokemon: Boolean): TooltipData {
+    private fun getTooltipData(
+        uuid: UUID,
+        trackedPokemon: TrackedPokemon?,
+        battlePokemon: Pokemon?,
+        isPlayerPokemon: Boolean
+    ): TooltipData {
         val name = battlePokemon?.getDisplayName()?.string
             ?: getPokemonNameFromUuid(uuid)
             ?: trackedPokemon?.displayName
             ?: "Unknown"
-
 
         val hpPercent = trackedPokemon?.hpPercent
             ?: battlePokemon?.let {
@@ -1520,7 +1685,11 @@ object TeamIndicatorUI {
                 if (trackedItem != null && trackedItem.status != BattleStateTracker.ItemStatus.HELD) {
                     trackedItem  // Use tracked status if item was consumed/knocked off
                 } else {
-                    BattleStateTracker.TrackedItem(heldItem.name.string, BattleStateTracker.ItemStatus.HELD, BattleStateTracker.currentTurn)
+                    BattleStateTracker.TrackedItem(
+                        heldItem.name.string,
+                        BattleStateTracker.ItemStatus.HELD,
+                        BattleStateTracker.currentTurn
+                    )
                 }
             } else {
                 // No item held - check if one was consumed/knocked off
@@ -1565,28 +1734,37 @@ object TeamIndicatorUI {
             } else {
                 // Ability not yet revealed - show possible abilities from species
                 abilityName = null
-                possibleAbilities = speciesName?.let { name ->
-                    PokemonSpecies.getByName(name.lowercase())?.abilities?.mapNotNull { potentialAbility ->
-                        // Try translation first, fall back to formatting the ID
-                        val translated = Text.translatable(potentialAbility.template.displayName).string
-                        val abilityId = potentialAbility.template.name
+                possibleAbilities = trackedPokemon?.form?.abilities?.mapNotNull { potentialAbility ->
+                    // Try translation first, fall back to formatting the ID
+                    val translated = Text.translatable(potentialAbility.template.displayName).string
+                    val abilityId = potentialAbility.template.name
 
-                        // If translation failed (returned key or looks like untranslated ID), format manually
-                        if (translated.startsWith("cobblemon.") || translated == abilityId) {
-                            formatAbilityName(abilityId)
-                        } else {
-                            translated
-                        }
-                    }?.distinct()
+                    // If translation failed (returned key or looks like untranslated ID), format manually
+                    if (translated.startsWith("cobblemon.") || translated == abilityId) {
+                        formatAbilityName(abilityId)
+                    } else {
+                        translated
+                    }
                 }
             }
         }
 
         // Get types from species (name must be lowercase for registry lookup)
         val species = speciesName?.let { PokemonSpecies.getByName(it.lowercase()) }
-        val primaryType = battlePokemon?.form?.primaryType
-        val secondaryType = battlePokemon?.form?.secondaryType
-        val teraType = battlePokemon?.teraType
+        val primaryType = if (battlePokemon != null) battlePokemon.form.primaryType
+        else {
+            if (trackedPokemon?.form != null) trackedPokemon.form?.primaryType
+            else species?.primaryType
+        }
+
+        val secondaryType = if (battlePokemon != null) battlePokemon.form.secondaryType
+        else {
+            if (trackedPokemon?.form != null) trackedPokemon.form?.secondaryType
+            else species?.secondaryType
+        }
+
+        val teraType = if (battlePokemon != null) battlePokemon.teraType
+        else trackedPokemon?.teraType
 
         return TooltipData(
             pokemonName = name,
@@ -1637,7 +1815,7 @@ object TeamIndicatorUI {
         }
 
         // Tera Type
-        if (data.teraType != null){
+        if (data.teraType != null) {
             val typeSegments = mutableListOf<Pair<String, Int>>()
             typeSegments.add("Tera Type: " to TOOLTIP_LABEL)
             val elementalType = ElementalTypes.get(data.teraType.showdownId());
@@ -1647,6 +1825,8 @@ object TeamIndicatorUI {
                 typeSegments.add(data.teraType.name to TOOLTIP_TEXT)
             }
             lines.add(typeSegments);
+        } else {
+            lines.add(listOf("Tera Type: Unknown" to TOOLTIP_LABEL))
         }
         // Ability
         if (data.abilityName != null) {
@@ -1907,7 +2087,8 @@ object TeamIndicatorUI {
      * Handle font size keybinds ([ and ] keys).
      */
     private fun handleFontKeybinds(handle: Long) {
-        val increaseKey = InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.increaseFontKey.boundKeyTranslationKey)
+        val increaseKey =
+            InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.increaseFontKey.boundKeyTranslationKey)
         val isIncreaseDown = isKeyOrButtonPressed(handle, increaseKey)
         if (isIncreaseDown && !wasIncreaseFontKeyPressed) {
             PanelConfig.adjustTooltipFontScale(PanelConfig.FONT_SCALE_STEP)
@@ -1915,7 +2096,8 @@ object TeamIndicatorUI {
         }
         wasIncreaseFontKeyPressed = isIncreaseDown
 
-        val decreaseKey = InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.decreaseFontKey.boundKeyTranslationKey)
+        val decreaseKey =
+            InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.decreaseFontKey.boundKeyTranslationKey)
         val isDecreaseDown = isKeyOrButtonPressed(handle, decreaseKey)
         if (isDecreaseDown && !wasDecreaseFontKeyPressed) {
             PanelConfig.adjustTooltipFontScale(-PanelConfig.FONT_SCALE_STEP)
@@ -1941,7 +2123,7 @@ object TeamIndicatorUI {
         val mc = MinecraftClient.getInstance()
         val handle = mc.window.handle
         val isCtrlDown = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS ||
-                         GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS
+            GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS
 
         if (isCtrlDown) {
             val delta = if (deltaY > 0) PanelConfig.FONT_SCALE_STEP else -PanelConfig.FONT_SCALE_STEP
